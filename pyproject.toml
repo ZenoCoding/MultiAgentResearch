@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multi-agent-research"
+version = "0.1.0"
+description = "A standardized harness for comparing single- and multi-agent LLM workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.72.0",
+    "pydantic>=2.10.0",
+    "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "ruff>=0.12.0",
+]
+
+[project.scripts]
+mar = "multi_agent_research.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/multi_agent_research"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"

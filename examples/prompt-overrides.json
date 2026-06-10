@@ -1,0 +1,10 @@
+{
+  "workflow.debate.peer_review": {
+    "version": "1.1.0",
+    "template": "Compare the other agents' answers with your own. Adopt a peer's claim only when its evidence or reasoning is stronger. Return your revised answer only.\n\nOther agents:\n$peer_answers"
+  },
+  "workflow.judge.selection": {
+    "version": "2.1.0",
+    "template": "Select the most accurate candidate answer to the original task shown above. Follow its required answer format.\n\n$candidates"
+  }
+}

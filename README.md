@@ -44,9 +44,112 @@ Utilizes the Agent Harness to run evaluations across a suite of reasoning, codin
 
 - [x] Set up the GitHub repository
 - [ ] Choose benchmark providers
-- [ ] Build the LLM Harness (`litellm`)
-- [ ] Build the Agent Harness
+- [x] Build the LLM Harness (`litellm`)
+- [x] Build the initial Agent Harness
 - [ ] Choose models for evaluation
+
+---
+
+## Harness
+
+The Python package standardizes benchmark tasks, agent configuration, model
+calls, workflow results, and usage data. It currently includes:
+
+* Solo agent
+* Independent sampling with a judge
+* Self-critique and revision
+* Multi-agent debate with a judge
+* Supervisor-worker revision
+
+Install the project:
+
+```bash
+uv sync --extra dev
+```
+
+Run a workflow:
+
+```bash
+uv run mar \
+  --workflow debate \
+  --model openai/gpt-5.4-nano \
+  --agents 2 \
+  --rounds 1 \
+  --experiment-id first-debate \
+  --prompt "Solve the problem and explain your answer."
+```
+
+Each run is stored under:
+
+```text
+results/<experiment-id>/<run-id>/
+  request.json
+  result.json
+  calls.jsonl
+  events.jsonl
+```
+
+`result.json` contains the final answer, full call records, aggregate token
+usage, estimated cost, latency, workflow events, and any failure information.
+
+### Benchmark boundary
+
+Benchmark adapters provide gold-free `TaskInput` objects containing text or
+multimodal messages plus an `AnswerSpec`. Gold answers and scoring remain
+outside the workflow harness. Results contain both the complete final response
+and an extracted, validated answer for the benchmark scorer.
+
+See [docs/benchmark-integration.md](docs/benchmark-integration.md) for the
+integration contract and examples.
+
+### Prompt and workflow versioning
+
+Each saved run includes:
+
+* A semantic workflow version, such as `debate@1.0.0`
+* A deterministic workflow fingerprint
+* Every workflow prompt's name, semantic version, full template, and SHA-256
+  content hash
+* Prompt references on each individual model call
+* The exact rendered messages sent to the model
+
+The fingerprint changes when workflow configuration, agent configuration,
+prompt versions, or prompt contents change. This prevents two materially
+different runs from being grouped together merely because they share a
+workflow name.
+
+Built-in prompts live in
+`src/multi_agent_research/prompts.py`. Override them without changing code by
+passing a JSON file:
+
+```bash
+uv run mar \
+  --workflow debate \
+  --model openai/gpt-5.4-nano \
+  --prompt-overrides examples/prompt-overrides.json \
+  --prompt "Solve this problem."
+```
+
+An override is keyed by the stable prompt name:
+
+```json
+{
+  "workflow.debate.peer_review": {
+    "version": "1.1.0",
+    "template": "Review these answers:\n$peer_answers"
+  }
+}
+```
+
+Overrides must preserve the variables required by the built-in prompt. When
+prompt wording changes, increment its version. When workflow control flow or
+message routing changes, increment the workflow class version.
+
+Run the deterministic workflow tests without making API calls:
+
+```bash
+uv run pytest
+```
 
 ---
 

@@ -51,6 +51,10 @@ def main() -> None:
                 "output": result.output.model_dump() if result.output else None,
                 "workflow": result.workflow.model_dump(),
                 "metrics": result.metrics.model_dump(),
+                "stage_answers": [
+                    stage_answer.model_dump(mode="json")
+                    for stage_answer in result.stage_answers
+                ],
             },
             indent=2,
         )
@@ -174,6 +178,7 @@ def _workflow(
             parallel=not args.sequential,
             aggregation=args.aggregation,
             voting=voting,
+            peer_view=args.debate_peer_view,
         )
     if args.workflow == "supervisor":
         supervisor_system = overridden(
@@ -271,6 +276,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-overrides")
     parser.add_argument("--agents", type=int, default=2)
     parser.add_argument("--rounds", type=int, default=1)
+    parser.add_argument(
+        "--debate-peer-view",
+        choices=["full_response", "answer_only", "answer_and_confidence"],
+        default="full_response",
+        help="Information from each peer shown during debate rounds.",
+    )
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--max-tokens", type=int)
     parser.add_argument(

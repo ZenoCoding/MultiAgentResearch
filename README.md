@@ -117,6 +117,21 @@ round run concurrently. Debate rounds themselves remain sequential and use a
 shared previous-round snapshot. Pass `--sequential` to disable parallel phases
 for timing comparisons or provider constraints.
 
+Debate can control what agents learn from their peers:
+
+```bash
+uv run mar \
+  --workflow debate \
+  --debate-peer-view answer_only \
+  --agents 3 \
+  --model openai/gpt-5.4-nano \
+  --prompt "Solve this problem."
+```
+
+Available peer views are `full_response`, `answer_only`, and
+`answer_and_confidence`. The last mode requires `--include-confidence` to
+expose a reported confidence value.
+
 Independent sampling and debate share configurable aggregation:
 
 ```bash
@@ -135,18 +150,70 @@ candidate-order answer, or use a seeded random choice. Invalid formatted
 ballots can be excluded or fail the run. The complete tally and ballot records
 are saved as a `votes_aggregated` workflow event.
 
+The CLI default is `judge` for both independent sampling and debate. The
+aggregation judge receives the original task and every candidate's full
+response. It is prompted to choose or synthesize the best response; it does
+not receive the gold answer and is not instructed to follow the majority.
+
+Voting extracts each candidate's `<final_answer>`. `majority_vote` requires one
+answer to receive more than half of valid ballots. `plurality_vote` selects the
+most frequent answer even without an absolute majority. Voting currently uses
+text normalization, not semantic equivalence, so it is best suited to
+multiple-choice, numeric, JSON, or otherwise canonical answers.
+
 Each run is stored under:
 
 ```text
 results/<experiment-id>/<run-id>/
   request.json
   result.json
+  provenance.json
+  source-reference.json
   calls.jsonl
   events.jsonl
+  artifact-manifest.json
+
+results/_artifacts/sources/<source-sha256>.tar.gz
 ```
 
 `result.json` contains the final answer, full call records, aggregate token
 usage, estimated cost, latency, workflow events, and any failure information.
+
+It also contains `stage_answers`, an ordered record of every answer-producing
+stage. Candidate records include independent samples, debate initial answers
+and revisions, self-critic revisions, and worker revisions. Judge or voting
+outputs are marked as aggregate answers. Each record preserves the agent,
+step, round metadata, raw response, parsed answer, confidence, and output
+contract validity.
+
+`provenance.json` records the command line, working directory, Git commit,
+branch and dirty status, Python/platform versions, installed dependency
+versions, relevant non-secret provider environment settings, credential and
+`.env` fingerprints, `uv.lock` hash, and a SHA-256 manifest of the source tree.
+The content-addressed source archive contains the exact non-secret repository
+files present when the runner was created. Identical runs share one archive
+under `results/_artifacts/sources`; each run stores only `source-reference.json`.
+Environment files such as `.env` and generated result directories are
+intentionally excluded; credentials are hashed rather than stored.
+
+Each model call records the exact rendered messages, requested model, completion
+parameters sent to LiteLLM, normalized output, provider response model, usage,
+cost, timing, raw provider response, and failure traceback/details.
+
+LiteLLM and provider-SDK retries are set to zero. Hidden fallback settings are
+rejected so orchestration retries remain visible as distinct recorded
+attempts. `artifact-manifest.json` stores the size and SHA-256 hash of every
+other run artifact for later integrity checks.
+
+The harness does not label a transition as correct or incorrect because
+`TaskInput` contains no gold answer. A benchmark scorer can compare consecutive
+stage answers against its private gold data to classify:
+
+* Wrong to right: good correction
+* Right to wrong: bad correction
+* Wrong to wrong without adopting a correct peer answer: failed persuasion
+* Right to right: retained correctness
+* Wrong to wrong with an answer change: unsuccessful revision
 
 ### Benchmark boundary
 

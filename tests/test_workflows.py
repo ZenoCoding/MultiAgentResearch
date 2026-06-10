@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import json
+import tarfile
 
 import pytest
 
@@ -49,12 +51,59 @@ async def test_solo_run_is_standardized_and_persisted(tmp_path):
     assert result.metrics.model_calls == 1
     assert result.metrics.total_tokens == 15
     assert result.metrics.cost_usd == pytest.approx(0.01)
+    assert [stage.output.answer for stage in result.stage_answers] == ["final answer"]
 
     run_dir = tmp_path / "experiment-1" / result.run_id
-    assert json.loads((run_dir / "result.json").read_text())["final_answer"] == (
-        "final answer"
+    saved_result = json.loads((run_dir / "result.json").read_text())
+    assert saved_result["final_answer"] == "final answer"
+    assert saved_result["stage_answers"][0]["step"] == "answer"
+    provenance = json.loads((run_dir / "provenance.json").read_text())
+    artifact_manifest = json.loads(
+        (run_dir / "artifact-manifest.json").read_text()
     )
+    source_reference = json.loads(
+        (run_dir / "source-reference.json").read_text()
+    )
+    source_path = tmp_path / source_reference["path"]
+    snapshot = source_path.read_bytes()
+    assert provenance["source_snapshot_sha256"] == sha256(snapshot).hexdigest()
+    assert source_reference["sha256"] == sha256(snapshot).hexdigest()
+    assert artifact_manifest["source-reference.json"]["sha256"]
+    assert provenance["git"]["commit"]
+    assert provenance["python_version"]
+    assert provenance["dependency_versions"]["pydantic"]
+    with tarfile.open(source_path, "r:gz") as archive:
+        names = archive.getnames()
+    assert "src/multi_agent_research/runner.py" in names
+    assert not any(name == ".env" or name.startswith("results/") for name in names)
     assert len((run_dir / "calls.jsonl").read_text().splitlines()) == 1
+
+
+@pytest.mark.asyncio
+async def test_source_snapshot_is_cached_across_runs(tmp_path):
+    runner = ExperimentRunner(
+        llm=FakeLLMClient(["first", "second"]),
+        store=FileRunStore(tmp_path),
+    )
+
+    first = await runner.run(
+        task=TaskInput.from_prompt(id="task-1", prompt="First"),
+        workflow=SoloWorkflow(agent("solo")),
+        experiment_id="experiment-1",
+    )
+    second = await runner.run(
+        task=TaskInput.from_prompt(id="task-2", prompt="Second"),
+        workflow=SoloWorkflow(agent("solo")),
+        experiment_id="experiment-1",
+    )
+
+    source_files = list((tmp_path / "_artifacts" / "sources").glob("*.tar.gz"))
+    assert len(source_files) == 1
+    for run_id in (first.run_id, second.run_id):
+        run_dir = tmp_path / "experiment-1" / run_id
+        reference = json.loads((run_dir / "source-reference.json").read_text())
+        assert reference["path"] == source_files[0].relative_to(tmp_path).as_posix()
+        assert not (run_dir / "source.tar.gz").exists()
 
 
 @pytest.mark.asyncio
@@ -73,6 +122,16 @@ async def test_independent_samples_are_judged():
 
     assert result.final_answer == "answer b"
     assert [call.step for call in result.calls] == ["sample_0", "sample_1", "judge"]
+    assert [stage.step for stage in result.stage_answers] == [
+        "sample_0",
+        "sample_1",
+        "judge",
+    ]
+    assert [stage.kind for stage in result.stage_answers] == [
+        "candidate",
+        "candidate",
+        "aggregate",
+    ]
     assert result.workflow.version == "2.2.0"
     assert result.workflow.fingerprint
     assert result.calls[-1].prompt_references[0].name == ("workflow.judge.selection")
@@ -132,6 +191,11 @@ async def test_self_critic_revises_answer():
 
     assert result.final_answer == "revision two"
     assert result.metrics.model_calls == 3
+    assert [stage.output.answer for stage in result.stage_answers] == [
+        "draft",
+        "revision one",
+        "revision two",
+    ]
 
 
 @pytest.mark.asyncio
@@ -152,6 +216,14 @@ async def test_debate_uses_peer_answers_then_judges():
 
     assert result.final_answer == "judged answer"
     assert result.metrics.model_calls == 5
+    assert [stage.step for stage in result.stage_answers] == [
+        "initial_0",
+        "initial_1",
+        "debate_1_0",
+        "debate_1_1",
+        "judge",
+    ]
+    assert result.stage_answers[-1].kind == "aggregate"
     assert "initial b" in llm.requests[2][-2].content
     assert "initial a" in llm.requests[3][-2].content
     assert result.calls[2].prompt_references[0].name == ("workflow.debate.peer_review")
@@ -208,6 +280,10 @@ async def test_supervisor_can_request_revision_then_approve():
 
     assert result.final_answer == "fixed"
     assert result.metrics.model_calls == 4
+    assert [stage.step for stage in result.stage_answers] == [
+        "worker_initial",
+        "worker_revision_1",
+    ]
 
 
 @pytest.mark.asyncio
@@ -409,6 +485,132 @@ async def test_debate_can_use_plurality_vote_without_judge():
     assert result.final_answer == "B"
     assert result.metrics.model_calls == 6
     assert all(call.agent_id != "judge" for call in result.calls)
+    assert [stage.step for stage in result.stage_answers] == [
+        "initial_0",
+        "initial_1",
+        "initial_2",
+        "debate_1_0",
+        "debate_1_1",
+        "debate_1_2",
+        "aggregation",
+    ]
+    assert result.stage_answers[-1].kind == "aggregate"
+
+
+@pytest.mark.asyncio
+async def test_debate_answer_only_hides_peer_reasoning():
+    llm = FakeLLMClient(
+        [
+            "Reasoning A\n<final_answer>A</final_answer>",
+            "Reasoning B\n<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=DebateWorkflow(
+            [agent("a"), agent("b")],
+            rounds=1,
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="first"),
+            peer_view="answer_only",
+        ),
+        experiment_id="experiment",
+    )
+
+    debate_calls = [call for call in result.calls if call.step.startswith("debate_")]
+    visible_messages = [
+        message.content
+        for call in debate_calls
+        for message in call.messages
+        if message.role == "user" and isinstance(message.content, str)
+    ]
+    assert any("Final answer: B" in message for message in visible_messages)
+    assert any("Final answer: A" in message for message in visible_messages)
+    assert all("Reasoning A" not in message for message in visible_messages)
+    assert all("Reasoning B" not in message for message in visible_messages)
+    assert result.workflow.config["peer_view"] == "answer_only"
+
+
+@pytest.mark.asyncio
+async def test_debate_answer_and_confidence_exposes_confidence():
+    llm = FakeLLMClient(
+        [
+            "Reasoning A\n<final_answer>A</final_answer>\n"
+            "<confidence>35</confidence>",
+            "Reasoning B\n<final_answer>B</final_answer>\n"
+            "<confidence>80</confidence>",
+            "<final_answer>A</final_answer>\n<confidence>55</confidence>",
+            "<final_answer>B</final_answer>\n<confidence>85</confidence>",
+        ]
+    )
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+            include_confidence=True,
+        ),
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=DebateWorkflow(
+            [agent("a"), agent("b")],
+            rounds=1,
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="first"),
+            peer_view="answer_and_confidence",
+        ),
+        experiment_id="experiment",
+    )
+
+    debate_calls = [call for call in result.calls if call.step.startswith("debate_")]
+    visible_messages = [
+        message.content
+        for call in debate_calls
+        for message in call.messages
+        if message.role == "user" and isinstance(message.content, str)
+    ]
+    assert any("Confidence: 80" in message for message in visible_messages)
+    assert any("Confidence: 35" in message for message in visible_messages)
+
+
+def test_debate_peer_view_changes_fingerprint():
+    agents = [agent("a"), agent("b")]
+
+    full_response = DebateWorkflow(
+        agents,
+        aggregation="plurality_vote",
+        peer_view="full_response",
+    )
+    answer_only = DebateWorkflow(
+        agents,
+        aggregation="plurality_vote",
+        peer_view="answer_only",
+    )
+
+    assert full_response.spec().fingerprint != answer_only.spec().fingerprint
+
+
+def test_unknown_debate_peer_view_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported peer view"):
+        DebateWorkflow(
+            [agent("a"), agent("b")],
+            aggregation="plurality_vote",
+            peer_view="unknown",
+        )
 
 
 @pytest.mark.asyncio

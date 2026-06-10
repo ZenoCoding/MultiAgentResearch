@@ -35,6 +35,7 @@ class SelfCriticWorkflow(Workflow):
             agent=self.agent,
             messages=task_messages(task, self.agent),
             prompt_references=[task.answer_spec.prompt_reference()],
+            track_answer=True,
         )
 
         for round_index in range(self.rounds):
@@ -58,6 +59,7 @@ class SelfCriticWorkflow(Workflow):
                     task.answer_spec.prompt_reference(),
                 ],
                 metadata={"round": round_index + 1},
+                track_answer=True,
             )
 
         context.emit("workflow_completed", workflow=self.name)

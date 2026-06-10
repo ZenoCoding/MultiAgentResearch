@@ -251,6 +251,8 @@ class UsageStats(HarnessModel):
 class CallError(HarnessModel):
     type: str
     message: str
+    traceback: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelCallRecord(HarnessModel):
@@ -262,8 +264,10 @@ class ModelCallRecord(HarnessModel):
     step: str
     agent_id: str
     requested_model: str
+    request_parameters: dict[str, Any] = Field(default_factory=dict)
     response_model: str | None = None
     response_service_tier: str | None = None
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
     messages: list[Message]
     prompt_references: list[PromptReference] = Field(default_factory=list)
     output: Message | None = None
@@ -293,12 +297,43 @@ class WorkflowSpec(HarnessModel):
     prompts: list[PromptTemplate] = Field(default_factory=list)
 
 
+class GitProvenance(HarnessModel):
+    repository_root: str
+    commit: str | None = None
+    branch: str | None = None
+    dirty: bool
+    status_short: str
+    remote_url: str | None = None
+
+
+class RunProvenance(HarnessModel):
+    schema_version: str = "1"
+    working_directory: str
+    argv: list[str]
+    python_version: str
+    python_implementation: str
+    python_executable: str
+    platform: str
+    machine: str
+    harness_version: str | None = None
+    litellm_version: str | None = None
+    dependency_versions: dict[str, str] = Field(default_factory=dict)
+    environment: dict[str, str] = Field(default_factory=dict)
+    credential_fingerprints: dict[str, str] = Field(default_factory=dict)
+    secret_file_sha256: dict[str, str] = Field(default_factory=dict)
+    lockfile_sha256: str | None = None
+    source_snapshot_sha256: str
+    source_files: dict[str, str] = Field(default_factory=dict)
+    git: GitProvenance | None = None
+
+
 class RunRequest(HarnessModel):
     id: str
     experiment_id: str
     created_at: datetime = Field(default_factory=utc_now)
     task: TaskInput
     workflow: WorkflowSpec
+    provenance: RunProvenance
 
 
 class RunMetrics(HarnessModel):
@@ -401,11 +436,22 @@ class WorkflowOutput(HarnessModel):
         )
 
 
+class StageAnswer(HarnessModel):
+    sequence: int
+    step: str
+    kind: Literal["candidate", "aggregate"]
+    agent_id: str | None = None
+    call_id: str | None = None
+    output: WorkflowOutput
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunResult(HarnessModel):
     run_id: str
     experiment_id: str
     task_id: str
     workflow: WorkflowSpec
+    provenance: RunProvenance
     status: Literal["success", "failed"]
     final_answer: str | None = None
     output: WorkflowOutput | None = None
@@ -414,4 +460,5 @@ class RunResult(HarnessModel):
     ended_at: datetime
     metrics: RunMetrics
     calls: list[ModelCallRecord]
+    stage_answers: list[StageAnswer] = Field(default_factory=list)
     events: list[WorkflowEvent]

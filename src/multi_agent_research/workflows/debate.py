@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from multi_agent_research.aggregation import (
     aggregate_votes,
@@ -9,7 +9,13 @@ from multi_agent_research.aggregation import (
     VotingConfig,
 )
 from multi_agent_research.context import CompletionSpec, RunContext, task_messages
-from multi_agent_research.models import AgentSpec, Message, PromptTemplate, TaskInput
+from multi_agent_research.models import (
+    AgentSpec,
+    Message,
+    PromptTemplate,
+    TaskInput,
+    WorkflowOutput,
+)
 from multi_agent_research.prompts import (
     DEBATE_REVIEW_PROMPT,
     JUDGE_SELECTION_PROMPT,
@@ -20,9 +26,21 @@ from multi_agent_research.workflows.base import Workflow
 from multi_agent_research.workflows.sample import _judge_prompt
 
 
+PeerView = Literal[
+    "full_response",
+    "answer_only",
+    "answer_and_confidence",
+]
+VALID_PEER_VIEWS = {
+    "full_response",
+    "answer_only",
+    "answer_and_confidence",
+}
+
+
 class DebateWorkflow(Workflow):
     name = "debate"
-    version = "2.2.0"
+    version = "2.3.0"
 
     def __init__(
         self,
@@ -34,6 +52,7 @@ class DebateWorkflow(Workflow):
         parallel: bool = True,
         aggregation: AggregationMode = "judge",
         voting: VotingConfig | None = None,
+        peer_view: PeerView = "full_response",
     ) -> None:
         if len(agents) < 2:
             raise ValueError("Debate requires at least two agents")
@@ -43,6 +62,8 @@ class DebateWorkflow(Workflow):
             raise ValueError(f"Unsupported aggregation mode: {aggregation}")
         if aggregation == "judge" and judge is None:
             raise ValueError("Judge aggregation requires a judge")
+        if peer_view not in VALID_PEER_VIEWS:
+            raise ValueError(f"Unsupported peer view: {peer_view}")
         self.agents = agents
         self.judge = judge
         self.rounds = rounds
@@ -51,6 +72,7 @@ class DebateWorkflow(Workflow):
         self.parallel = parallel
         self.aggregation = aggregation
         self.voting = voting or VotingConfig()
+        self.peer_view = peer_view
 
     async def run(self, task: TaskInput, context: RunContext) -> str:
         context.emit("workflow_started", workflow=self.name)
@@ -62,6 +84,7 @@ class DebateWorkflow(Workflow):
                     messages=task_messages(task, agent),
                     prompt_references=[task.answer_spec.prompt_reference()],
                     metadata={"phase": "initial", "agent_index": index},
+                    track_answer=True,
                 )
                 for index, agent in enumerate(self.agents)
             ],
@@ -80,11 +103,7 @@ class DebateWorkflow(Workflow):
             previous_answers = dict(answers)
             round_specs: list[CompletionSpec] = []
             for index, agent in enumerate(self.agents):
-                peer_text = "\n\n".join(
-                    f"{peer_id}:\n{answer}"
-                    for peer_id, answer in previous_answers.items()
-                    if peer_id != agent.id
-                )
+                peer_text = self._peer_text(task, previous_answers, agent.id)
                 messages = task_messages(
                     task,
                     agent,
@@ -113,6 +132,7 @@ class DebateWorkflow(Workflow):
                             "round": round_index + 1,
                             "agent_index": index,
                         },
+                        track_answer=True,
                     )
                 )
             round_responses = await context.complete_many(
@@ -136,6 +156,12 @@ class DebateWorkflow(Workflow):
                 config=self.voting,
             )
             context.emit("votes_aggregated", **vote.model_dump())
+            context.record_stage_answer(
+                step="aggregation",
+                response=vote.response(task.answer_spec),
+                kind="aggregate",
+                metadata={"aggregation": self.aggregation},
+            )
             context.emit("workflow_completed", workflow=self.name)
             return vote.response(task.answer_spec)
 
@@ -160,7 +186,9 @@ class DebateWorkflow(Workflow):
                 self.judge_prompt.reference(),
                 task.answer_spec.prompt_reference(),
             ],
-            metadata={"phase": "judge"},
+            metadata={"phase": "judge", "aggregation": "judge"},
+            track_answer=True,
+            answer_kind="aggregate",
         )
         context.emit("workflow_completed", workflow=self.name)
         return final_answer
@@ -173,6 +201,7 @@ class DebateWorkflow(Workflow):
             "parallel": self.parallel,
             "aggregation": self.aggregation,
             "voting": self.voting.model_dump(),
+            "peer_view": self.peer_view,
         }
 
     def prompt_templates(self) -> list[PromptTemplate]:
@@ -184,3 +213,26 @@ class DebateWorkflow(Workflow):
                 self.judge_prompt if self.aggregation == "judge" else None,
             ]
         )
+
+    def _peer_text(
+        self,
+        task: TaskInput,
+        answers: dict[str, str],
+        current_agent_id: str,
+    ) -> str:
+        peers: list[str] = []
+        for peer_id, response in answers.items():
+            if peer_id == current_agent_id:
+                continue
+            if self.peer_view == "full_response":
+                visible = response
+            else:
+                output = WorkflowOutput.from_response(response, task.answer_spec)
+                visible = f"Final answer: {output.answer}"
+                if (
+                    self.peer_view == "answer_and_confidence"
+                    and output.confidence is not None
+                ):
+                    visible += f"\nConfidence: {output.confidence:g}"
+            peers.append(f"{peer_id}:\n{visible}")
+        return "\n\n".join(peers)

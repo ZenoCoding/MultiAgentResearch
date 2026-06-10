@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from multi_agent_research.llm import LLMCallError, LLMClient
 from multi_agent_research.models import (
@@ -10,7 +10,9 @@ from multi_agent_research.models import (
     Message,
     ModelCallRecord,
     PromptReference,
+    StageAnswer,
     TaskInput,
+    WorkflowOutput,
     WorkflowEvent,
 )
 from multi_agent_research.prompts import system_prompt_reference
@@ -23,6 +25,8 @@ class CompletionSpec:
     messages: list[Message]
     prompt_references: list[PromptReference] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    track_answer: bool = False
+    answer_kind: Literal["candidate", "aggregate"] = "candidate"
 
 
 class RunContext:
@@ -39,6 +43,7 @@ class RunContext:
         self.workflow_name = workflow_name
         self.llm = llm
         self.calls: list[ModelCallRecord] = []
+        self.stage_answers: list[StageAnswer] = []
         self.events: list[WorkflowEvent] = []
         self._next_sequence = 0
 
@@ -54,6 +59,8 @@ class RunContext:
         prompt_references: list[PromptReference] | None = None,
         metadata: dict[str, Any] | None = None,
         sequence: int | None = None,
+        track_answer: bool = False,
+        answer_kind: Literal["candidate", "aggregate"] = "candidate",
     ) -> str:
         if sequence is None:
             sequence = self.reserve_sequence()
@@ -91,7 +98,47 @@ class RunContext:
             agent_id=agent.id,
             call_id=call.id,
         )
-        return call.output.content if call.output else ""
+        response = call.output.content if call.output else ""
+        if track_answer:
+            self.record_stage_answer(
+                step=step,
+                response=response,
+                kind=answer_kind,
+                agent_id=agent.id,
+                call_id=call.id,
+                metadata=metadata,
+                sequence=sequence,
+            )
+        return response
+
+    def record_stage_answer(
+        self,
+        *,
+        step: str,
+        response: str,
+        kind: Literal["candidate", "aggregate"],
+        agent_id: str | None = None,
+        call_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        sequence: int | None = None,
+    ) -> StageAnswer:
+        if sequence is None:
+            sequence = self.reserve_sequence()
+        stage_answer = StageAnswer(
+            sequence=sequence,
+            step=step,
+            kind=kind,
+            agent_id=agent_id,
+            call_id=call_id,
+            output=WorkflowOutput.from_response(
+                response,
+                self.task.answer_spec,
+            ),
+            metadata=metadata or {},
+        )
+        self.stage_answers.append(stage_answer)
+        self.emit("stage_answer_recorded", **stage_answer.model_dump())
+        return stage_answer
 
     def reserve_sequence(self) -> int:
         sequence = self._next_sequence
@@ -116,6 +163,8 @@ class RunContext:
                         prompt_references=spec.prompt_references,
                         metadata=spec.metadata,
                         sequence=sequence,
+                        track_answer=spec.track_answer,
+                        answer_kind=spec.answer_kind,
                     )
                 )
             return results
@@ -128,6 +177,8 @@ class RunContext:
                 prompt_references=spec.prompt_references,
                 metadata=spec.metadata,
                 sequence=sequence,
+                track_answer=spec.track_answer,
+                answer_kind=spec.answer_kind,
             )
             for spec, sequence in zip(specs, sequences, strict=True)
         ]

@@ -54,6 +54,7 @@ class IndependentSampleWorkflow(Workflow):
                     messages=task_messages(task, agent),
                     prompt_references=[task.answer_spec.prompt_reference()],
                     metadata={"sample_index": index},
+                    track_answer=True,
                 )
                 for index, agent in enumerate(self.agents)
             ],
@@ -72,6 +73,12 @@ class IndependentSampleWorkflow(Workflow):
                 config=self.voting,
             )
             context.emit("votes_aggregated", **vote.model_dump())
+            context.record_stage_answer(
+                step="aggregation",
+                response=vote.response(task.answer_spec),
+                kind="aggregate",
+                metadata={"aggregation": self.aggregation},
+            )
             context.emit("workflow_completed", workflow=self.name)
             return vote.response(task.answer_spec)
 
@@ -89,6 +96,9 @@ class IndependentSampleWorkflow(Workflow):
                 self.judge_prompt.reference(),
                 task.answer_spec.prompt_reference(),
             ],
+            metadata={"aggregation": "judge"},
+            track_answer=True,
+            answer_kind="aggregate",
         )
         context.emit("workflow_completed", workflow=self.name)
         return final_answer

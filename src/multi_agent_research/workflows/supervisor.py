@@ -40,6 +40,7 @@ class SupervisorWorkflow(Workflow):
             agent=self.worker,
             messages=task_messages(task, self.worker),
             prompt_references=[task.answer_spec.prompt_reference()],
+            track_answer=True,
         )
 
         for revision in range(self.max_revisions):
@@ -88,6 +89,7 @@ class SupervisorWorkflow(Workflow):
                     task.answer_spec.prompt_reference(),
                 ],
                 metadata={"revision": revision + 1},
+                track_answer=True,
             )
 
         context.emit("workflow_completed", workflow=self.name)

@@ -1,0 +1,156 @@
+# Experiment Plan
+
+## Research question
+
+When a fixed model is given additional inference budget, does communication
+between agents improve closed-ended reasoning more than spending the same
+budget on independent attempts?
+
+The primary study is intended to run on Humanity's Last Exam (HLE), but
+benchmark integration is outside the core harness. The harness receives
+gold-free `TaskInput` objects and does not load, filter, sample, or score HLE.
+
+## Primary hypotheses
+
+1. One round of peer review improves accuracy over the same agents' initial
+   answers.
+2. Debate outperforms independent sampling at a similar model-call and token
+   budget.
+3. Full reasoning exchange performs differently from sharing final answers
+   alone.
+4. Reported peer confidence changes revision behavior and calibration.
+
+## Pilot requirements
+
+Sarah's experiment layer supplies a fixed, versioned task set and experiment
+manifest. For the first study, the requested task-set properties are 100
+text-only, multiple-choice HLE questions with recorded task IDs, sampling
+method, seed, and subject distribution. Multiple choice keeps plurality
+aggregation objective and avoids treating semantically equivalent short answers
+as different votes.
+
+Use one primary model, fixed generation parameters, and the same questions for
+every condition. Run three repetitions when provider nondeterminism or a nonzero
+temperature is present.
+
+| ID | Condition | Calls before aggregation | Purpose |
+| --- | --- | ---: | --- |
+| S1 | Solo | 1 | Baseline |
+| S3 | Three independent samples | 3 | Benefit from multiple attempts |
+| S6 | Six independent samples | 6 | Call-budget control for one-round debate |
+| D3-A | Three agents, one round, answer only | 6 | Interaction without reasoning exchange |
+| D3-R | Three agents, one round, full response | 6 | Interaction with reasoning exchange |
+| D3-C | Three agents, one round, answer and confidence | 6 | Confidence-signaling effect |
+
+Use plurality voting for the primary comparison so judge behavior is not
+confounded with agent interaction. Run judge aggregation as a separate
+secondary experiment.
+
+Short-answer and multimodal study phases depend on task sets and scoring
+provided by the experiment layer. Do not mix those results into the primary
+multiple-choice analysis.
+
+For every debate run, score both:
+
+- The plurality answer from the three initial responses.
+- The plurality answer after the debate round.
+- Every individual agent answer at the initial and post-debate stages.
+
+This paired within-run comparison measures whether communication changes
+correct answers to incorrect ones or incorrect answers to correct ones.
+
+Join `stage_answers` to the benchmark layer's private correctness labels by
+task ID. For each agent and adjacent answer stage, classify:
+
+- Good correction: incorrect to correct
+- Bad correction: correct to incorrect
+- Retained correctness: correct to correct
+- Failed correction: incorrect to incorrect
+
+For debate, additionally record whether a correct peer answer was visible
+before an agent remained incorrect. This is an operational measure of failed
+persuasion; it does not prove that the peer's reasoning caused or should have
+caused a change.
+
+## Aggregation terminology
+
+The workflow aggregation judge and the HLE grading judge are different:
+
+- The aggregation judge sees the original task and candidate responses, but no
+  gold answer. It chooses or synthesizes a final response.
+- The HLE grading judge belongs to the benchmark layer. It sees the model
+  response and reference answer and decides whether they match.
+
+Voting makes no model call. It extracts each candidate's final answer,
+normalizes it, and selects by strict majority or plurality. This is reliable
+for canonical answers such as multiple-choice labels. Free-form short answers
+can be semantically equivalent but textually different, so plain string voting
+should not be the primary aggregation method for them.
+
+## Metrics
+
+Primary:
+
+- Accuracy
+- Paired accuracy difference on identical tasks
+- Wrong-to-right and right-to-wrong revision counts
+
+Efficiency:
+
+- Input, output, reasoning, and total tokens
+- Estimated cost
+- Wall-clock latency
+- Accuracy per dollar and per million tokens
+
+Calibration:
+
+- Brier score
+- Expected calibration error
+- Accuracy by confidence bucket
+
+Report confidence intervals for paired accuracy differences. Do not treat
+model calls from the same task as independent samples.
+
+## Required controls
+
+The harness must preserve these variables in the workflow fingerprint and saved
+configuration:
+
+- Per-agent model, system prompt, reasoning effort, service tier, and generation
+  parameters
+- Agent count and debate rounds
+- Peer view: full response, final answer only, or answer plus confidence
+- Aggregation method and tie policy
+- Prompt versions
+- Parallel or sequential execution
+
+The current Python workflow API already supports heterogeneous `AgentSpec`
+objects. The experiment layer should construct those agents from its config
+rather than adding a second agent implementation.
+
+## Deferred controls
+
+Do not add these to the first pilot:
+
+- Sparse or directed communication topologies
+- Agent identities or assigned personas
+- Early stopping on consensus
+- Dynamic agent replacement
+- Tool access
+- Mixed-model teams
+
+They are useful follow-up variables, but including them now would make the
+initial experiment too broad to interpret.
+
+## Ownership boundary
+
+The core harness owns workflow behavior, prompts, model calls, fingerprints,
+and per-run artifacts.
+
+Sarah's experiment layer owns all benchmark concerns: HLE access, importing,
+conversion, filtering, sampling, task-set manifests, gold data, scoring, and
+benchmark-version tracking. It also owns condition matrices, repetitions,
+concurrency, retries, resume behavior, and aggregate reports.
+
+The core harness only consumes the resulting gold-free `TaskInput` objects and
+executes the requested workflow configuration.

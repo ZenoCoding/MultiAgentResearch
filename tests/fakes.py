@@ -49,6 +49,7 @@ class FakeLLMClient:
             step=step,
             agent_id=agent.id,
             requested_model=agent.model,
+            request_parameters=agent.completion_parameters(),
             response_model=agent.model,
             response_service_tier=agent.service_tier,
             messages=messages,

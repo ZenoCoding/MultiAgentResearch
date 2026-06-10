@@ -69,6 +69,7 @@ class ExperimentRunner:
 
         ended_at = utc_now()
         wall_time_ms = (monotonic() - started_clock) * 1000
+        calls = sorted(context.calls, key=lambda call: call.sequence)
         result = RunResult(
             run_id=run_id,
             experiment_id=experiment_id,
@@ -80,8 +81,8 @@ class ExperimentRunner:
             error=error,
             started_at=started_at,
             ended_at=ended_at,
-            metrics=RunMetrics.from_calls(context.calls, wall_time_ms),
-            calls=context.calls,
+            metrics=RunMetrics.from_calls(calls, wall_time_ms),
+            calls=calls,
             events=context.events,
         )
         if self.store:

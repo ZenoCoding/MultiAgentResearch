@@ -17,6 +17,7 @@ from multi_agent_research.models import (
 class FakeResponse:
     id = "call-1"
     model = "provider/model-version"
+    service_tier = "flex"
     choices = [SimpleNamespace(message=SimpleNamespace(content="normalized answer"))]
     _hidden_params = {"response_cost": 0.0123}
 
@@ -47,6 +48,7 @@ async def test_litellm_response_is_normalized(monkeypatch):
     )
 
     record = await LiteLLMClient().complete(
+        sequence=0,
         run_id="run-1",
         task_id="task-1",
         workflow="solo",
@@ -57,6 +59,7 @@ async def test_litellm_response_is_normalized(monkeypatch):
 
     assert record.output.content == "normalized answer"
     assert record.response_model == "provider/model-version"
+    assert record.response_service_tier == "flex"
     assert record.usage.input_tokens == 12
     assert record.usage.output_tokens == 8
     assert record.usage.reasoning_tokens == 4
@@ -85,6 +88,7 @@ async def test_litellm_receives_multimodal_message_parts(monkeypatch):
     )
 
     await LiteLLMClient().complete(
+        sequence=0,
         run_id="run-1",
         task_id="task-1",
         workflow="solo",
@@ -103,4 +107,95 @@ async def test_litellm_receives_multimodal_message_parts(monkeypatch):
             "url": "https://example.com/image.png",
             "detail": "auto",
         },
+    }
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_is_sent_as_first_class_agent_setting(monkeypatch):
+    captured = {}
+
+    async def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "multi_agent_research.litellm_client.litellm.acompletion",
+        fake_completion,
+    )
+
+    await LiteLLMClient().complete(
+        sequence=0,
+        run_id="run-1",
+        task_id="task-1",
+        workflow="solo",
+        step="answer",
+        agent=AgentSpec(
+            id="agent-1",
+            model="provider/model",
+            reasoning_effort="high",
+        ),
+        messages=[Message(role="user", content="Question")],
+    )
+
+    assert captured["reasoning_effort"] == "high"
+
+
+def test_legacy_nested_reasoning_effort_is_normalized():
+    agent = AgentSpec(
+        id="agent-1",
+        model="provider/model",
+        parameters={"reasoning_effort": "medium", "temperature": 0.5},
+    )
+
+    assert agent.reasoning_effort == "medium"
+    assert agent.parameters == {"temperature": 0.5}
+    assert agent.completion_parameters() == {
+        "temperature": 0.5,
+        "reasoning_effort": "medium",
+    }
+
+
+@pytest.mark.asyncio
+async def test_service_tier_is_sent_as_first_class_agent_setting(monkeypatch):
+    captured = {}
+
+    async def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "multi_agent_research.litellm_client.litellm.acompletion",
+        fake_completion,
+    )
+
+    record = await LiteLLMClient().complete(
+        sequence=0,
+        run_id="run-1",
+        task_id="task-1",
+        workflow="solo",
+        step="answer",
+        agent=AgentSpec(
+            id="agent-1",
+            model="provider/model",
+            service_tier="priority",
+        ),
+        messages=[Message(role="user", content="Question")],
+    )
+
+    assert captured["service_tier"] == "priority"
+    assert record.response_service_tier == "flex"
+
+
+def test_legacy_nested_service_tier_is_normalized():
+    agent = AgentSpec(
+        id="agent-1",
+        model="provider/model",
+        parameters={"service_tier": "flex", "temperature": 0.5},
+    )
+
+    assert agent.service_tier == "flex"
+    assert agent.parameters == {"temperature": 0.5}
+    assert agent.completion_parameters() == {
+        "temperature": 0.5,
+        "service_tier": "flex",
     }

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from multi_agent_research.aggregation import VotingConfig
 from multi_agent_research.models import (
     AgentSpec,
     AnswerChoice,
@@ -25,7 +26,7 @@ from multi_agent_research.workflows import (
     SoloWorkflow,
     SupervisorWorkflow,
 )
-from tests.fakes import FakeLLMClient
+from tests.fakes import DelayedFakeLLMClient, FakeLLMClient
 
 
 def agent(agent_id: str) -> AgentSpec:
@@ -72,9 +73,51 @@ async def test_independent_samples_are_judged():
 
     assert result.final_answer == "answer b"
     assert [call.step for call in result.calls] == ["sample_0", "sample_1", "judge"]
-    assert result.workflow.version == "2.0.0"
+    assert result.workflow.version == "2.2.0"
     assert result.workflow.fingerprint
     assert result.calls[-1].prompt_references[0].name == ("workflow.judge.selection")
+
+
+@pytest.mark.asyncio
+async def test_independent_samples_run_in_parallel_with_stable_call_order():
+    llm = DelayedFakeLLMClient(
+        ["fast sample", "slow sample", "judged answer"],
+        delays={"a": 0.05, "b": 0.01},
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(id="task-1", prompt="Question"),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            agent("judge"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert llm.max_active_calls == 2
+    assert result.final_answer == "judged answer"
+    assert [call.step for call in result.calls] == ["sample_0", "sample_1", "judge"]
+    assert [call.sequence for call in result.calls] == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_parallel_phases_can_be_disabled():
+    llm = DelayedFakeLLMClient(
+        ["sample a", "sample b", "judged answer"],
+        delays={"a": 0.01, "b": 0.01},
+    )
+
+    await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(id="task-1", prompt="Question"),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            agent("judge"),
+            parallel=False,
+        ),
+        experiment_id="experiment",
+    )
+
+    assert llm.max_active_calls == 1
 
 
 @pytest.mark.asyncio
@@ -112,6 +155,41 @@ async def test_debate_uses_peer_answers_then_judges():
     assert "initial b" in llm.requests[2][-2].content
     assert "initial a" in llm.requests[3][-2].content
     assert result.calls[2].prompt_references[0].name == ("workflow.debate.peer_review")
+
+
+@pytest.mark.asyncio
+async def test_debate_initial_answers_and_each_round_run_in_parallel():
+    llm = DelayedFakeLLMClient(
+        [
+            "fast initial",
+            "slow initial",
+            "fast revision",
+            "slow revision",
+            "judged answer",
+        ],
+        delays={"a": 0.05, "b": 0.01},
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(id="task-1", prompt="Question"),
+        workflow=DebateWorkflow(
+            [agent("a"), agent("b")],
+            agent("judge"),
+            rounds=1,
+        ),
+        experiment_id="experiment",
+    )
+
+    assert llm.max_active_calls == 2
+    assert result.final_answer == "judged answer"
+    assert [call.step for call in result.calls] == [
+        "initial_0",
+        "initial_1",
+        "debate_1_0",
+        "debate_1_1",
+        "judge",
+    ]
+    assert [call.sequence for call in result.calls] == [0, 1, 2, 3, 4]
 
 
 @pytest.mark.asyncio
@@ -236,3 +314,172 @@ def test_prompt_hash_prevents_version_label_from_hiding_content_change():
     )
 
     assert first.content_sha256 != second.content_sha256
+
+
+def test_service_tier_changes_workflow_fingerprint():
+    default_tier = SoloWorkflow(
+        AgentSpec(
+            id="a",
+            model="fake/model",
+            service_tier="default",
+        )
+    )
+    flex_tier = SoloWorkflow(
+        AgentSpec(
+            id="a",
+            model="fake/model",
+            service_tier="flex",
+        )
+    )
+
+    assert default_tier.spec().fingerprint != flex_tier.spec().fingerprint
+
+
+@pytest.mark.asyncio
+async def test_independent_sample_can_use_majority_vote_without_judge():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput(
+            id="task-1",
+            messages=[Message(role="user", content="Choose A or B")],
+            answer_spec=AnswerSpec(
+                type="multiple_choice",
+                choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+            ),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            aggregation="majority_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "B"
+    assert result.metrics.model_calls == 3
+    assert [call.step for call in result.calls] == [
+        "sample_0",
+        "sample_1",
+        "sample_2",
+    ]
+    assert result.workflow.config["judge"] is None
+    assert result.workflow.config["aggregation"] == "majority_vote"
+    vote_event = next(
+        event for event in result.events if event.type == "votes_aggregated"
+    )
+    assert vote_event.data["tally"] == {"a": 1, "b": 2}
+
+
+@pytest.mark.asyncio
+async def test_debate_can_use_plurality_vote_without_judge():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput(
+            id="task-1",
+            messages=[Message(role="user", content="Choose A or B")],
+            answer_spec=AnswerSpec(
+                type="multiple_choice",
+                choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+            ),
+        ),
+        workflow=DebateWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            rounds=1,
+            aggregation="plurality_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "B"
+    assert result.metrics.model_calls == 6
+    assert all(call.agent_id != "judge" for call in result.calls)
+
+
+@pytest.mark.asyncio
+async def test_voting_tie_policy_is_explicit():
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+
+    failed = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="error"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert failed.status == "failed"
+    assert "Voting tie" in failed.error.message
+
+
+@pytest.mark.asyncio
+async def test_invalid_ballots_can_be_excluded():
+    llm = FakeLLMClient(
+        [
+            "unformatted answer",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput(
+            id="task-1",
+            messages=[Message(role="user", content="Choose A or B")],
+            answer_spec=AnswerSpec(
+                type="multiple_choice",
+                choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+            ),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            aggregation="majority_vote",
+            voting=VotingConfig(invalid_ballot_policy="exclude"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "B"
+    vote_event = next(
+        event for event in result.events if event.type == "votes_aggregated"
+    )
+    assert vote_event.data["valid_ballots"] == 2
+    assert vote_event.data["total_ballots"] == 3
+
+
+def test_unknown_aggregation_mode_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported aggregation"):
+        IndependentSampleWorkflow(
+            [agent("a")],
+            aggregation="unknown",
+        )

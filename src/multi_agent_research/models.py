@@ -195,7 +195,49 @@ class AgentSpec(HarnessModel):
     system_prompt: str = ""
     system_prompt_name: str | None = None
     system_prompt_version: str = "inline"
+    reasoning_effort: str | None = None
+    service_tier: Literal["auto", "default", "flex", "priority"] | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_first_class_parameters(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        parameters = dict(normalized.get("parameters") or {})
+        nested_effort = parameters.pop("reasoning_effort", None)
+        nested_service_tier = parameters.pop("service_tier", None)
+        explicit_effort = normalized.get("reasoning_effort")
+        explicit_service_tier = normalized.get("service_tier")
+        if (
+            nested_effort is not None
+            and explicit_effort is not None
+            and nested_effort != explicit_effort
+        ):
+            raise ValueError(
+                "reasoning_effort conflicts with parameters.reasoning_effort"
+            )
+        if explicit_effort is None and nested_effort is not None:
+            normalized["reasoning_effort"] = nested_effort
+        if (
+            nested_service_tier is not None
+            and explicit_service_tier is not None
+            and nested_service_tier != explicit_service_tier
+        ):
+            raise ValueError("service_tier conflicts with parameters.service_tier")
+        if explicit_service_tier is None and nested_service_tier is not None:
+            normalized["service_tier"] = nested_service_tier
+        normalized["parameters"] = parameters
+        return normalized
+
+    def completion_parameters(self) -> dict[str, Any]:
+        parameters = dict(self.parameters)
+        if self.reasoning_effort is not None:
+            parameters["reasoning_effort"] = self.reasoning_effort
+        if self.service_tier is not None:
+            parameters["service_tier"] = self.service_tier
+        return parameters
 
 
 class UsageStats(HarnessModel):
@@ -213,6 +255,7 @@ class CallError(HarnessModel):
 
 class ModelCallRecord(HarnessModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
+    sequence: int
     run_id: str
     task_id: str
     workflow: str
@@ -220,6 +263,7 @@ class ModelCallRecord(HarnessModel):
     agent_id: str
     requested_model: str
     response_model: str | None = None
+    response_service_tier: str | None = None
     messages: list[Message]
     prompt_references: list[PromptReference] = Field(default_factory=list)
     output: Message | None = None

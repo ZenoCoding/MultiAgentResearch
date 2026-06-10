@@ -1,5 +1,6 @@
 """Multi-agent research harness."""
 
+from multi_agent_research.aggregation import VotingConfig
 from multi_agent_research.models import (
     AgentSpec,
     AnswerChoice,
@@ -27,5 +28,6 @@ __all__ = [
     "TaskInput",
     "TaskSource",
     "TextContent",
+    "VotingConfig",
     "WorkflowOutput",
 ]

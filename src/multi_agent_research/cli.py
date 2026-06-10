@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
+from multi_agent_research.aggregation import VotingConfig
 from multi_agent_research.litellm_client import LiteLLMClient
 from multi_agent_research.models import (
     AgentSpec,
@@ -67,6 +68,8 @@ async def _run(args: argparse.Namespace):
         system_prompt=args.system_prompt,
         system_prompt_name="agent.primary.system",
         system_prompt_version=args.system_prompt_version,
+        reasoning_effort=args.reasoning_effort,
+        service_tier=args.service_tier,
         parameters=parameters,
     )
     workflow = _workflow(args, base_agent, parameters, prompt_overrides)
@@ -114,23 +117,34 @@ def _workflow(
             id=f"agent-{index + 1}",
             model=args.model,
             system_prompt=args.system_prompt,
+            system_prompt_name="agent.primary.system",
+            system_prompt_version=args.system_prompt_version,
+            reasoning_effort=args.reasoning_effort,
+            service_tier=args.service_tier,
             parameters=parameters,
         )
         for index in range(args.agents)
     ]
-    judge = AgentSpec(
-        id="judge",
-        model=args.judge_model or args.model,
-        system_prompt=overridden(
+    judge = None
+    if args.aggregation == "judge":
+        judge_system = overridden(
             JUDGE_SYSTEM_PROMPT,
             prompt_overrides,
-        ).template,
-        system_prompt_name=JUDGE_SYSTEM_PROMPT.name,
-        system_prompt_version=overridden(
-            JUDGE_SYSTEM_PROMPT,
-            prompt_overrides,
-        ).version,
-        parameters=parameters,
+        )
+        judge = AgentSpec(
+            id="judge",
+            model=args.judge_model or args.model,
+            system_prompt=judge_system.template,
+            system_prompt_name=judge_system.name,
+            system_prompt_version=judge_system.version,
+            reasoning_effort=args.judge_reasoning_effort or args.reasoning_effort,
+            service_tier=args.judge_service_tier or args.service_tier,
+            parameters=parameters,
+        )
+    voting = VotingConfig(
+        tie_break=args.vote_tie_break,
+        random_seed=args.vote_seed,
+        invalid_ballot_policy=args.invalid_ballot_policy,
     )
     if args.workflow == "sample":
         return IndependentSampleWorkflow(
@@ -140,6 +154,9 @@ def _workflow(
                 JUDGE_SELECTION_PROMPT,
                 prompt_overrides,
             ),
+            parallel=not args.sequential,
+            aggregation=args.aggregation,
+            voting=voting,
         )
     if args.workflow == "debate":
         return DebateWorkflow(
@@ -154,6 +171,9 @@ def _workflow(
                 JUDGE_SELECTION_PROMPT,
                 prompt_overrides,
             ),
+            parallel=not args.sequential,
+            aggregation=args.aggregation,
+            voting=voting,
         )
     if args.workflow == "supervisor":
         supervisor_system = overridden(
@@ -166,6 +186,16 @@ def _workflow(
             system_prompt=supervisor_system.template,
             system_prompt_name=supervisor_system.name,
             system_prompt_version=supervisor_system.version,
+            reasoning_effort=(
+                args.supervisor_reasoning_effort
+                or args.judge_reasoning_effort
+                or args.reasoning_effort
+            ),
+            service_tier=(
+                args.supervisor_service_tier
+                or args.judge_service_tier
+                or args.service_tier
+            ),
             parameters=parameters,
         )
         return SupervisorWorkflow(
@@ -190,8 +220,6 @@ def _model_parameters(args: argparse.Namespace) -> dict:
         parameters["temperature"] = args.temperature
     if args.max_tokens is not None:
         parameters["max_tokens"] = args.max_tokens
-    if args.reasoning_effort is not None:
-        parameters["reasoning_effort"] = args.reasoning_effort
     return parameters
 
 
@@ -245,7 +273,55 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--max-tokens", type=int)
-    parser.add_argument("--reasoning-effort")
+    parser.add_argument(
+        "--reasoning-effort",
+        help="Reasoning effort for primary agents, for example low or high.",
+    )
+    parser.add_argument(
+        "--judge-reasoning-effort",
+        help="Override reasoning effort for the judge.",
+    )
+    parser.add_argument(
+        "--supervisor-reasoning-effort",
+        help="Override reasoning effort for the supervisor.",
+    )
+    parser.add_argument(
+        "--service-tier",
+        choices=["auto", "default", "flex", "priority"],
+        help="Processing tier for primary agents.",
+    )
+    parser.add_argument(
+        "--judge-service-tier",
+        choices=["auto", "default", "flex", "priority"],
+        help="Override processing tier for the judge.",
+    )
+    parser.add_argument(
+        "--supervisor-service-tier",
+        choices=["auto", "default", "flex", "priority"],
+        help="Override processing tier for the supervisor.",
+    )
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Disable parallel calls in independent workflow phases.",
+    )
+    parser.add_argument(
+        "--aggregation",
+        choices=["judge", "majority_vote", "plurality_vote"],
+        default="judge",
+        help="How sample and debate workflows select their final answer.",
+    )
+    parser.add_argument(
+        "--vote-tie-break",
+        choices=["error", "first", "random"],
+        default="error",
+    )
+    parser.add_argument("--vote-seed", type=int, default=0)
+    parser.add_argument(
+        "--invalid-ballot-policy",
+        choices=["exclude", "error"],
+        default="exclude",
+    )
     parser.add_argument("--output-dir", default="results")
     return parser
 

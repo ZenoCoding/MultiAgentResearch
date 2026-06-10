@@ -79,6 +79,62 @@ uv run mar \
   --prompt "Solve the problem and explain your answer."
 ```
 
+Reasoning effort is a first-class agent setting:
+
+```bash
+uv run mar \
+  --workflow debate \
+  --model openai/gpt-5.4-nano \
+  --reasoning-effort low \
+  --judge-reasoning-effort high \
+  --prompt "Solve this problem."
+```
+
+`--reasoning-effort` applies to the primary agents.
+`--judge-reasoning-effort` and `--supervisor-reasoning-effort` override it for
+those roles. Values are passed through LiteLLM because supported effort names
+vary by provider and model.
+
+Processing priority is also configurable per role:
+
+```bash
+uv run mar \
+  --workflow sample \
+  --model openai/gpt-5.4-nano \
+  --service-tier flex \
+  --judge-service-tier priority \
+  --prompt "Solve this problem."
+```
+
+Supported tier values are `auto`, `default`, `flex`, and `priority`.
+`--service-tier` applies to primary agents; judge and supervisor flags override
+it for those roles. The requested tier is included in the workflow
+fingerprint, and the provider's returned tier is saved on each model call when
+available.
+
+Independent samples, debate initial answers, and all agents within each debate
+round run concurrently. Debate rounds themselves remain sequential and use a
+shared previous-round snapshot. Pass `--sequential` to disable parallel phases
+for timing comparisons or provider constraints.
+
+Independent sampling and debate share configurable aggregation:
+
+```bash
+uv run mar \
+  --workflow debate \
+  --aggregation majority_vote \
+  --vote-tie-break error \
+  --agents 3 \
+  --model openai/gpt-5.4-nano \
+  --prompt "Solve this problem."
+```
+
+Available modes are `judge`, `majority_vote`, and `plurality_vote`. Voting
+modes make no judge call. Tie handling is explicit: fail, choose the first
+candidate-order answer, or use a seeded random choice. Invalid formatted
+ballots can be excluded or fail the run. The complete tally and ballot records
+are saved as a `votes_aggregated` workflow event.
+
 Each run is stored under:
 
 ```text

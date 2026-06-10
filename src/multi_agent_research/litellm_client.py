@@ -21,6 +21,7 @@ class LiteLLMClient:
     async def complete(
         self,
         *,
+        sequence: int,
         run_id: str,
         task_id: str,
         workflow: str,
@@ -39,7 +40,7 @@ class LiteLLMClient:
             response = await litellm.acompletion(
                 model=agent.model,
                 messages=request_messages,
-                **agent.parameters,
+                **agent.completion_parameters(),
             )
             ended_at = utc_now()
             raw = self._to_dict(response)
@@ -47,6 +48,7 @@ class LiteLLMClient:
 
             return ModelCallRecord(
                 id=str(getattr(response, "id", None) or uuid4()),
+                sequence=sequence,
                 run_id=run_id,
                 task_id=task_id,
                 workflow=workflow,
@@ -54,6 +56,7 @@ class LiteLLMClient:
                 agent_id=agent.id,
                 requested_model=agent.model,
                 response_model=getattr(response, "model", None),
+                response_service_tier=self._extract_service_tier(response, raw),
                 messages=messages,
                 prompt_references=prompt_references or [],
                 output=Message(role="assistant", content=output_text),
@@ -69,6 +72,7 @@ class LiteLLMClient:
         except Exception as exc:
             ended_at = utc_now()
             record = ModelCallRecord(
+                sequence=sequence,
                 run_id=run_id,
                 task_id=task_id,
                 workflow=workflow,
@@ -126,3 +130,16 @@ class LiteLLMClient:
             return float(litellm.completion_cost(completion_response=response))
         except Exception:
             return None
+
+    @staticmethod
+    def _extract_service_tier(
+        response: Any,
+        raw: dict[str, Any],
+    ) -> str | None:
+        tier = getattr(response, "service_tier", None)
+        if tier is None:
+            tier = raw.get("service_tier")
+        if tier is None:
+            hidden = getattr(response, "_hidden_params", {}) or {}
+            tier = hidden.get("service_tier")
+        return str(tier) if tier is not None else None

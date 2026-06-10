@@ -22,6 +22,7 @@ class LLMClient(Protocol):
     async def complete(
         self,
         *,
+        sequence: int,
         run_id: str,
         task_id: str,
         workflow: str,

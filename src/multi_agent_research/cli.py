@@ -28,6 +28,7 @@ from multi_agent_research.prompts import (
     JUDGE_SELECTION_PROMPT,
     JUDGE_SYSTEM_PROMPT,
     SELF_CRITIC_REVISION_PROMPT,
+    SHORT_ANSWER_SEMANTIC_VOTE_PROMPT,
     SUPERVISOR_REVIEW_PROMPT,
     SUPERVISOR_SYSTEM_PROMPT,
     TIE_BREAK_JUDGE_PROMPT,
@@ -141,7 +142,14 @@ def _workflow(
         for index in range(args.agents)
     ]
     judge = None
-    if args.aggregation == "judge" or args.vote_tie_break == "judge":
+    if (
+        args.aggregation == "judge"
+        or args.vote_tie_break == "judge"
+        or (
+            args.answer_type == "short_answer"
+            and args.aggregation in {"majority_vote", "plurality_vote"}
+        )
+    ):
         judge_system = overridden(
             JUDGE_SYSTEM_PROMPT,
             prompt_overrides,
@@ -169,6 +177,10 @@ def _workflow(
                 JUDGE_SELECTION_PROMPT,
                 prompt_overrides,
             ),
+            semantic_vote_prompt=overridden(
+                SHORT_ANSWER_SEMANTIC_VOTE_PROMPT,
+                prompt_overrides,
+            ),
             tie_break_judge_prompt=overridden(
                 TIE_BREAK_JUDGE_PROMPT,
                 prompt_overrides,
@@ -193,6 +205,10 @@ def _workflow(
             ),
             judge_prompt=overridden(
                 JUDGE_SELECTION_PROMPT,
+                prompt_overrides,
+            ),
+            semantic_vote_prompt=overridden(
+                SHORT_ANSWER_SEMANTIC_VOTE_PROMPT,
                 prompt_overrides,
             ),
             tie_break_judge_prompt=overridden(

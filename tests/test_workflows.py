@@ -122,7 +122,11 @@ async def test_independent_samples_are_judged():
     )
 
     assert result.final_answer == "answer b"
-    assert [call.step for call in result.calls] == ["sample_0", "sample_1", "judge"]
+    assert [call.step for call in result.calls] == [
+        "sample_0",
+        "sample_1",
+        "judge",
+    ]
     assert [stage.step for stage in result.stage_answers] == [
         "sample_0",
         "sample_1",
@@ -133,9 +137,9 @@ async def test_independent_samples_are_judged():
         "candidate",
         "aggregate",
     ]
-    assert result.workflow.version == "2.4.0"
+    assert result.workflow.version == "2.6.0"
     assert result.workflow.fingerprint
-    assert result.calls[-1].prompt_references[0].name == ("workflow.judge.selection")
+    assert result.calls[-1].prompt_references[0].name == "workflow.judge.selection"
 
 
 @pytest.mark.asyncio
@@ -158,6 +162,203 @@ async def test_independent_samples_run_in_parallel_with_stable_call_order():
     assert result.final_answer == "judged answer"
     assert [call.step for call in result.calls] == ["sample_0", "sample_1", "judge"]
     assert [call.sequence for call in result.calls] == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_short_answer_sampling_plurality_uses_semantic_vote_judge():
+    llm = FakeLLMClient(
+        [
+            "First candidate\n<final_answer>NYC</final_answer>",
+            "Second candidate\n<final_answer>New York City</final_answer>",
+            "Third candidate\n<final_answer>Boston</final_answer>",
+            "<vote_status>winner</vote_status>\n"
+            "<final_answer>New York City</final_answer>",
+        ]
+    )
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Name the city.",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            agent("judge"),
+            aggregation="plurality_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "New York City"
+    assert result.calls[-1].step == "semantic_vote_judge"
+    assert result.calls[-1].metadata == {
+        "aggregation": "plurality_vote",
+        "judge_objective": "semantic_vote",
+        "candidate_count": 3,
+        "total_ballots": 3,
+        "tie_break": "inconclusive",
+    }
+    assert result.calls[-1].prompt_references[0].name == (
+        "workflow.vote.short_answer_semantic"
+    )
+    judge_instruction = result.calls[-1].messages[-2].content
+    assert isinstance(judge_instruction, str)
+    assert "Group final answers that are semantically equivalent" in (
+        judge_instruction
+    )
+    assert "<final_answer>NYC</final_answer>" in judge_instruction
+    assert "<final_answer>New York City</final_answer>" in judge_instruction
+
+
+@pytest.mark.asyncio
+async def test_short_answer_majority_vote_can_be_inconclusive():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>NYC</final_answer>",
+            "<final_answer>Boston</final_answer>",
+            "<final_answer>Chicago</final_answer>",
+            "<vote_status>inconclusive</vote_status>",
+        ]
+    )
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Name the city.",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            agent("judge"),
+            aggregation="majority_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "inconclusive"
+    assert result.final_answer is None
+    assert result.inconclusive is not None
+    assert result.inconclusive.details["reason"] == "no_strict_majority"
+    assert result.calls[-1].step == "semantic_vote_judge"
+
+
+@pytest.mark.asyncio
+async def test_short_answer_semantic_vote_rejects_random_tie_break():
+    result = await ExperimentRunner(
+        llm=FakeLLMClient(
+            [
+                "<final_answer>NYC</final_answer>",
+                "<final_answer>Boston</final_answer>",
+            ]
+        )
+    ).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Name the city.",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            agent("judge"),
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="random"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "failed"
+    assert result.error is not None
+    assert "does not support random tie-breaking" in result.error.message
+
+
+@pytest.mark.asyncio
+async def test_short_answer_judge_aggregation_keeps_best_answer_behavior():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>NYC</final_answer>",
+            "<final_answer>New York City</final_answer>",
+            "<final_answer>Boston</final_answer>",
+            "<final_answer>Boston</final_answer>",
+        ]
+    )
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Name the city.",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            agent("judge"),
+            aggregation="judge",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "Boston"
+    assert result.calls[-1].step == "judge"
+    assert result.calls[-1].prompt_references[0].name == "workflow.judge.selection"
+
+
+@pytest.mark.asyncio
+async def test_short_answer_semantic_vote_excludes_invalid_ballots():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>NYC</final_answer>",
+            "missing answer tag",
+            "<final_answer>New York City</final_answer>",
+            "<vote_status>winner</vote_status>\n"
+            "<final_answer>NYC</final_answer>",
+        ]
+    )
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Name the city.",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            agent("judge"),
+            aggregation="majority_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "NYC"
+    assert result.calls[-1].metadata["candidate_count"] == 2
+    assert result.calls[-1].metadata["total_ballots"] == 3
+    semantic_vote_prompt = result.calls[-1].messages[-2].content
+    assert isinstance(semantic_vote_prompt, str)
+    assert "missing answer tag" not in semantic_vote_prompt
+
+
+@pytest.mark.asyncio
+async def test_multiple_choice_sampling_keeps_best_answer_judge():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput(
+            id="task-1",
+            messages=[Message(role="user", content="Choose A or B")],
+            answer_spec=AnswerSpec(
+                type="multiple_choice",
+                choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+            ),
+        ),
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            agent("judge"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.calls[-1].step == "judge"
+    assert result.calls[-1].prompt_references[0].name == "workflow.judge.selection"
 
 
 @pytest.mark.asyncio
@@ -266,6 +467,43 @@ async def test_debate_initial_answers_and_each_round_run_in_parallel():
 
 
 @pytest.mark.asyncio
+async def test_short_answer_debate_plurality_uses_semantic_vote_judge():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>NYC</final_answer>",
+            "<final_answer>New York City</final_answer>",
+            "<final_answer>Boston</final_answer>",
+            "<final_answer>NYC</final_answer>",
+            "<final_answer>New York City</final_answer>",
+            "<final_answer>Boston</final_answer>",
+            "<vote_status>winner</vote_status>\n"
+            "<final_answer>New York City</final_answer>",
+        ]
+    )
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Name the city.",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=DebateWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            agent("judge"),
+            rounds=1,
+            aggregation="plurality_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "New York City"
+    assert result.calls[-1].step == "semantic_vote_judge"
+    assert result.calls[-1].prompt_references[0].name == (
+        "workflow.vote.short_answer_semantic"
+    )
+    assert result.calls[-1].metadata["judge_objective"] == "semantic_vote"
+
+
+@pytest.mark.asyncio
 async def test_adversarial_debate_diversifies_and_challenges_unanimity():
     llm = FakeLLMClient(
         [
@@ -301,7 +539,7 @@ async def test_adversarial_debate_diversifies_and_challenges_unanimity():
 
     assert result.final_answer == "B"
     assert result.workflow.name == "adversarial_debate"
-    assert result.workflow.version == "1.0.0"
+    assert result.workflow.version == "1.2.0"
     assert result.workflow.config["mode"] == "adversarial"
     assert result.workflow.config["adversarial_roles"] == [
         "workflow.debate.role.derivation",

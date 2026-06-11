@@ -84,15 +84,17 @@ caused a change.
 The workflow aggregation judge and the HLE grading judge are different:
 
 - The aggregation judge sees the original task and candidate responses, but no
-  gold answer. It chooses or synthesizes a final response.
+  gold answer. It chooses or synthesizes the best final response regardless of
+  answer type.
 - The HLE grading judge belongs to the benchmark layer. It sees the model
   response and reference answer and decides whether they match.
 
-Voting makes no model call. It extracts each candidate's final answer,
-normalizes it, and selects by strict majority or plurality. This is reliable
-for canonical answers such as multiple-choice labels. Free-form short answers
-can be semantically equivalent but textually different, so plain string voting
-should not be the primary aggregation method for them.
+Voting extracts each candidate's final answer and selects by strict majority
+or plurality. Canonical answers such as multiple-choice labels are normalized
+and counted directly without a model call. For short answers, a semantic vote
+judge groups equivalent answers and then applies the requested voting rule.
+This judge cannot choose a semantically smaller group merely because it thinks
+that answer is more accurate.
 
 ## Metrics
 

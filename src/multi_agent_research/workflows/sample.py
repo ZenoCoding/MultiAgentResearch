@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from multi_agent_research.aggregation import (
     aggregate_votes,
+    AggregationInconclusive,
     AggregationMode,
     JudgeTieBreakRequired,
     normalize_answer,
+    prepare_vote_ballots,
     VALID_AGGREGATION_MODES,
     VotingConfig,
 )
@@ -20,6 +23,7 @@ from multi_agent_research.models import (
 )
 from multi_agent_research.prompts import (
     JUDGE_SELECTION_PROMPT,
+    SHORT_ANSWER_SEMANTIC_VOTE_PROMPT,
     TIE_BREAK_JUDGE_PROMPT,
     system_prompt_template,
     unique_prompts,
@@ -29,13 +33,16 @@ from multi_agent_research.workflows.base import Workflow
 
 class IndependentSampleWorkflow(Workflow):
     name = "independent_sample"
-    version = "2.4.0"
+    version = "2.6.0"
 
     def __init__(
         self,
         agents: list[AgentSpec],
         judge: AgentSpec | None = None,
         judge_prompt: PromptTemplate = JUDGE_SELECTION_PROMPT,
+        semantic_vote_prompt: PromptTemplate = (
+            SHORT_ANSWER_SEMANTIC_VOTE_PROMPT
+        ),
         tie_break_judge_prompt: PromptTemplate = TIE_BREAK_JUDGE_PROMPT,
         parallel: bool = True,
         aggregation: AggregationMode = "judge",
@@ -53,6 +60,7 @@ class IndependentSampleWorkflow(Workflow):
         self.agents = agents
         self.judge = judge
         self.judge_prompt = judge_prompt
+        self.semantic_vote_prompt = semantic_vote_prompt
         self.tie_break_judge_prompt = tie_break_judge_prompt
         self.parallel = parallel
         self.aggregation = aggregation
@@ -80,6 +88,16 @@ class IndependentSampleWorkflow(Workflow):
         ]
 
         if self.aggregation != "judge":
+            if task.answer_spec.type == "short_answer":
+                return await _judge_semantic_vote(
+                    task=task,
+                    context=context,
+                    judge=self.judge,
+                    prompt=self.semantic_vote_prompt,
+                    candidates=answers,
+                    mode=self.aggregation,
+                    voting=self.voting,
+                )
             try:
                 vote = aggregate_votes(
                     task=task,
@@ -106,14 +124,14 @@ class IndependentSampleWorkflow(Workflow):
             return vote.response(task.answer_spec)
 
         assert self.judge is not None
-        judge_prompt = _judge_prompt(self.judge_prompt, answers)
+        rendered_prompt = _judge_prompt(self.judge_prompt, answers)
         final_answer = await context.complete(
             step="judge",
             agent=self.judge,
             messages=task_messages(
                 task,
                 self.judge,
-                [Message(role="user", content=judge_prompt)],
+                [Message(role="user", content=rendered_prompt)],
             ),
             prompt_references=[
                 self.judge_prompt.reference(),
@@ -142,6 +160,11 @@ class IndependentSampleWorkflow(Workflow):
                 system_prompt_template(self.judge) if self.judge else None,
                 self.judge_prompt if self.aggregation == "judge" else None,
                 (
+                    self.semantic_vote_prompt
+                    if self.aggregation != "judge"
+                    else None
+                ),
+                (
                     self.tie_break_judge_prompt
                     if self.voting.tie_break == "judge"
                     else None
@@ -149,16 +172,123 @@ class IndependentSampleWorkflow(Workflow):
             ]
         )
 
-
 def _judge_prompt(
     prompt: PromptTemplate,
     answers: list[tuple[str, str]],
+    **values: Any,
 ) -> str:
     candidates = "\n\n".join(
         f"Candidate {index + 1} ({agent_id}):\n{answer}"
         for index, (agent_id, answer) in enumerate(answers)
     )
-    return prompt.render(candidates=candidates)
+    return prompt.render(candidates=candidates, **values)
+
+
+async def _judge_semantic_vote(
+    *,
+    task: TaskInput,
+    context: RunContext,
+    judge: AgentSpec | None,
+    prompt: PromptTemplate,
+    candidates: list[tuple[str, str]],
+    mode: str,
+    voting: VotingConfig,
+) -> str:
+    if judge is None:
+        raise ValueError(
+            "Short-answer voting requires a judge for semantic grouping"
+        )
+    if voting.tie_break == "random":
+        raise ValueError(
+            "Semantic short-answer voting does not support random tie-breaking"
+        )
+    ballots = prepare_vote_ballots(
+        candidates=candidates,
+        answer_spec=task.answer_spec,
+        config=voting,
+    )
+    included = [ballot for ballot in ballots if ballot.included]
+    if not included:
+        raise ValueError("Voting produced no valid ballots")
+    valid_candidates = [
+        (ballot.candidate_id, ballot.raw_response) for ballot in included
+    ]
+    rendered = _judge_prompt(
+        prompt,
+        valid_candidates,
+        mode=mode,
+        candidate_count=len(valid_candidates),
+        tie_policy=voting.tie_break,
+    )
+    response = await context.complete(
+        step="semantic_vote_judge",
+        agent=judge,
+        messages=task_messages(
+            task,
+            judge,
+            [Message(role="user", content=rendered)],
+        ),
+        prompt_references=[
+            prompt.reference(),
+            task.answer_spec.prompt_reference(),
+        ],
+        metadata={
+            "aggregation": mode,
+            "judge_objective": "semantic_vote",
+            "candidate_count": len(valid_candidates),
+            "total_ballots": len(ballots),
+            "tie_break": voting.tie_break,
+        },
+    )
+    status_matches = re.findall(
+        r"<vote_status>\s*(winner|inconclusive)\s*</vote_status>",
+        response,
+        flags=re.IGNORECASE,
+    )
+    if not status_matches:
+        raise ValueError("Semantic vote judge omitted vote_status")
+    if status_matches[-1].casefold() == "inconclusive":
+        reason = "no_strict_majority" if mode == "majority_vote" else "tie"
+        raise AggregationInconclusive(
+            (
+                "Semantic voting produced no strict majority"
+                if reason == "no_strict_majority"
+                else "Semantic voting produced a tied plurality"
+            ),
+            details={
+                "aggregation": mode,
+                "reason": reason,
+                "valid_ballots": len(included),
+                "total_ballots": len(ballots),
+                "ballots": [ballot.model_dump() for ballot in ballots],
+                "judge_response": response,
+            },
+        )
+    output = WorkflowOutput.from_response(response, task.answer_spec)
+    if not output.contract_valid:
+        raise ValueError(
+            "Semantic vote judge returned an invalid winner: "
+            + ", ".join(output.validation_errors)
+        )
+    context.record_stage_answer(
+        step="aggregation",
+        response=response,
+        kind="aggregate",
+        metadata={
+            "aggregation": mode,
+            "judge_objective": "semantic_vote",
+        },
+    )
+    context.emit(
+        "votes_aggregated",
+        mode=mode,
+        winner=output.answer,
+        semantic=True,
+        valid_ballots=len(included),
+        total_ballots=len(ballots),
+    )
+    context.emit("workflow_completed", workflow=context.workflow_name)
+    return response
 
 
 async def _judge_vote_tie(

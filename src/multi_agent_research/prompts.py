@@ -24,6 +24,28 @@ JUDGE_SELECTION_PROMPT = PromptTemplate(
     ),
 )
 
+SHORT_ANSWER_SEMANTIC_VOTE_PROMPT = PromptTemplate(
+    name="workflow.vote.short_answer_semantic",
+    version="1.0.0",
+    template=(
+        "Perform $mode aggregation over $candidate_count short-answer "
+        "candidates. Group final answers that are semantically equivalent even "
+        "when wording, abbreviations, units, or formatting differ. For "
+        "plurality_vote, select the largest semantic group. For majority_vote, "
+        "select a group only if it contains more than half of all candidates; "
+        "otherwise report no majority. Do not replace the vote winner with the "
+        "answer you independently think is correct. If the largest groups are "
+        "tied, apply this tie policy: $tie_policy. For inconclusive, report an "
+        "inconclusive vote. For first, choose the tied group whose earliest "
+        "candidate appears first. For judge, use candidate reasoning only to "
+        "choose among the tied groups. Begin with exactly "
+        "<vote_status>winner</vote_status> or "
+        "<vote_status>inconclusive</vote_status>. For a winner, return one "
+        "candidate's final answer from the winning group using the original "
+        "task's required answer format.\n\n$candidates"
+    ),
+)
+
 TIE_BREAK_JUDGE_PROMPT = PromptTemplate(
     name="workflow.judge.tie_break",
     version="1.0.0",

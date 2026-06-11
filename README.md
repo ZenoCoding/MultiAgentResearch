@@ -198,23 +198,28 @@ uv run mar \
   --prompt "Solve this problem."
 ```
 
-Available modes are `judge`, `majority_vote`, and `plurality_vote`. Voting
-modes normally make no judge call. Tie handling is explicit: record an
-inconclusive run, choose the first candidate-order answer, use a seeded random
-choice, or call a judge only when the top vote is tied. Invalid formatted
-ballots can be excluded or fail the run. Inconclusive runs retain the complete
-tally and ballot records without being classified as execution failures.
+Available modes are `judge`, `majority_vote`, and `plurality_vote`. For
+canonical answer types, voting makes no judge call unless a tie requires one.
+Tie handling is explicit: record an inconclusive run, choose the first
+candidate-order answer, use a seeded random choice, or call a judge only when
+the top vote is tied. Invalid formatted ballots can be excluded or fail the
+run. Inconclusive runs retain the complete tally and ballot records without
+being classified as execution failures.
 
 The CLI default is `judge` for both independent sampling and debate. The
 aggregation judge receives the original task and every candidate's full
-response. It is prompted to choose or synthesize the best response; it does
-not receive the gold answer and is not instructed to follow the majority.
+response and chooses or synthesizes the best response. This meaning is the
+same for every answer type, and the judge does not receive the gold answer.
 
 Voting extracts each candidate's `<final_answer>`. `majority_vote` requires one
 answer to receive more than half of valid ballots. `plurality_vote` selects the
-most frequent answer even without an absolute majority. Voting currently uses
-text normalization, not semantic equivalence, so it is best suited to
-multiple-choice, numeric, JSON, or otherwise canonical answers.
+most frequent answer even without an absolute majority. For `short_answer`, a
+semantic vote judge groups equivalent answers before applying the selected
+vote rule; it cannot replace the winning group with a minority answer it
+prefers. The call is recorded as `semantic_vote_judge`. Semantic voting
+supports `inconclusive`, `first`, and `judge` tie policies; seeded `random`
+ties are rejected because model-based grouping cannot reproduce that seed
+reliably.
 
 Each run is stored under:
 

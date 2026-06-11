@@ -28,12 +28,17 @@ from multi_agent_research.prompts import (
     DEBATE_DERIVATION_ROLE_PROMPT,
     DEBATE_REVIEW_PROMPT,
     JUDGE_SELECTION_PROMPT,
+    SHORT_ANSWER_SEMANTIC_VOTE_PROMPT,
     TIE_BREAK_JUDGE_PROMPT,
     system_prompt_template,
     unique_prompts,
 )
 from multi_agent_research.workflows.base import Workflow
-from multi_agent_research.workflows.sample import _judge_prompt, _judge_vote_tie
+from multi_agent_research.workflows.sample import (
+    _judge_prompt,
+    _judge_semantic_vote,
+    _judge_vote_tie,
+)
 
 
 PeerView = Literal[
@@ -52,7 +57,7 @@ VALID_DEBATE_MODES = {"standard", "adversarial"}
 
 class DebateWorkflow(Workflow):
     name = "debate"
-    version = "2.5.0"
+    version = "2.7.0"
 
     def __init__(
         self,
@@ -61,6 +66,9 @@ class DebateWorkflow(Workflow):
         rounds: int = 1,
         debate_prompt: PromptTemplate = DEBATE_REVIEW_PROMPT,
         judge_prompt: PromptTemplate = JUDGE_SELECTION_PROMPT,
+        semantic_vote_prompt: PromptTemplate = (
+            SHORT_ANSWER_SEMANTIC_VOTE_PROMPT
+        ),
         tie_break_judge_prompt: PromptTemplate = TIE_BREAK_JUDGE_PROMPT,
         parallel: bool = True,
         aggregation: AggregationMode = "judge",
@@ -104,6 +112,7 @@ class DebateWorkflow(Workflow):
         self.rounds = rounds
         self.debate_prompt = debate_prompt
         self.judge_prompt = judge_prompt
+        self.semantic_vote_prompt = semantic_vote_prompt
         self.tie_break_judge_prompt = tie_break_judge_prompt
         self.parallel = parallel
         self.aggregation = aggregation
@@ -220,6 +229,16 @@ class DebateWorkflow(Workflow):
             }
 
         if self.aggregation != "judge":
+            if task.answer_spec.type == "short_answer":
+                return await _judge_semantic_vote(
+                    task=task,
+                    context=context,
+                    judge=self.judge,
+                    prompt=self.semantic_vote_prompt,
+                    candidates=list(answers.items()),
+                    mode=self.aggregation,
+                    voting=self.voting,
+                )
             try:
                 vote = aggregate_votes(
                     task=task,
@@ -327,6 +346,11 @@ class DebateWorkflow(Workflow):
                 ),
                 self.judge_prompt if self.aggregation == "judge" else None,
                 (
+                    self.semantic_vote_prompt
+                    if self.aggregation != "judge"
+                    else None
+                ),
+                (
                     self.tie_break_judge_prompt
                     if self.voting.tie_break == "judge"
                     else None
@@ -427,7 +451,7 @@ class DebateWorkflow(Workflow):
 
 class AdversarialDebateWorkflow(DebateWorkflow):
     name = "adversarial_debate"
-    version = "1.0.0"
+    version = "1.2.0"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["mode"] = "adversarial"

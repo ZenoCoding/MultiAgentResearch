@@ -82,10 +82,11 @@ def aggregate_votes(
     mode: Literal["majority_vote", "plurality_vote"],
     config: VotingConfig,
 ) -> VoteResult:
-    ballots = [
-        _ballot(candidate_id, response, task.answer_spec, config)
-        for candidate_id, response in candidates
-    ]
+    ballots = prepare_vote_ballots(
+        candidates=candidates,
+        answer_spec=task.answer_spec,
+        config=config,
+    )
     included = [ballot for ballot in ballots if ballot.included]
     if not included:
         raise ValueError("Voting produced no valid ballots")
@@ -189,28 +190,32 @@ def _inconclusive_details(
     }
 
 
-def _ballot(
-    candidate_id: str,
-    response: str,
+def prepare_vote_ballots(
+    *,
+    candidates: list[tuple[str, str]],
     answer_spec: AnswerSpec,
     config: VotingConfig,
-) -> VoteBallot:
-    output = WorkflowOutput.from_response(response, answer_spec)
-    if not output.contract_valid and config.invalid_ballot_policy == "error":
-        raise ValueError(
-            f"Invalid ballot from {candidate_id}: "
-            + ", ".join(output.validation_errors)
+) -> list[VoteBallot]:
+    ballots: list[VoteBallot] = []
+    for candidate_id, response in candidates:
+        output = WorkflowOutput.from_response(response, answer_spec)
+        if not output.contract_valid and config.invalid_ballot_policy == "error":
+            raise ValueError(
+                f"Invalid ballot from {candidate_id}: "
+                + ", ".join(output.validation_errors)
+            )
+        ballots.append(
+            VoteBallot(
+                candidate_id=candidate_id,
+                raw_response=response,
+                answer=output.answer,
+                normalized_answer=normalize_answer(output.answer, answer_spec),
+                contract_valid=output.contract_valid,
+                included=output.contract_valid,
+                validation_errors=output.validation_errors,
+            )
         )
-    included = output.contract_valid
-    return VoteBallot(
-        candidate_id=candidate_id,
-        raw_response=response,
-        answer=output.answer,
-        normalized_answer=normalize_answer(output.answer, answer_spec),
-        contract_valid=output.contract_valid,
-        included=included,
-        validation_errors=output.validation_errors,
-    )
+    return ballots
 
 
 def normalize_answer(answer: str, answer_spec: AnswerSpec) -> str:

@@ -99,6 +99,15 @@ task = TaskInput(
 )
 ```
 
+When sampling or debate uses `majority_vote` or `plurality_vote` for a
+`short_answer` task, a semantic vote judge groups equivalent answers before
+applying the vote rule. For example, `NYC` and `New York City` can count
+together. The judge must return a representative answer from the winning
+group; it cannot substitute a minority answer it independently prefers.
+
+`aggregation="judge"` remains a separate behavior for every answer type: the
+judge chooses or synthesizes the answer it considers best.
+
 ## Output contract
 
 Every answer-producing model call receives an instruction to end with:
@@ -133,8 +142,9 @@ Benchmark correctness remains the benchmark adapter's responsibility.
 * `code`
 * `free_text`
 
-These types constrain output formatting; they do not define benchmark-specific
-correctness or semantic equivalence.
+These types constrain output formatting. The `short_answer` type also uses
+semantic grouping when a voting aggregation is selected; benchmark
+correctness remains the benchmark adapter's responsibility.
 
 ## Source identity
 

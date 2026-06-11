@@ -56,6 +56,13 @@ For every debate run, score both:
 - The plurality answer after the debate round.
 - Every individual agent answer at the initial and post-debate stages.
 
+Treat standard debate and adversarial debate as separate workflow conditions.
+Adversarial debate assigns heterogeneous initial reasoning roles, challenges
+unanimous initial answers as possible correlated errors, and uses a later
+evidence-resolution round. Compare it directly with standard debate at the
+same agent count, round count, model settings, peer visibility, and
+aggregation policy.
+
 This paired within-run comparison measures whether communication changes
 correct answers to incorrect ones or incorrect answers to correct ones.
 

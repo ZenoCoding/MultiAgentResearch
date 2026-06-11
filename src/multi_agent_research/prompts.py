@@ -54,6 +54,76 @@ DEBATE_REVIEW_PROMPT = PromptTemplate(
     ),
 )
 
+DEBATE_DERIVATION_ROLE_PROMPT = PromptTemplate(
+    name="workflow.debate.role.derivation",
+    version="1.0.0",
+    template=(
+        "Act as the first-principles solver. Derive the answer independently, "
+        "state the assumptions that your derivation needs, and verify the "
+        "critical transformations rather than relying on a familiar formula."
+    ),
+)
+
+DEBATE_ASSUMPTION_AUDITOR_ROLE_PROMPT = PromptTemplate(
+    name="workflow.debate.role.assumption_auditor",
+    version="1.0.0",
+    template=(
+        "Act as the assumption auditor. Solve independently while looking for "
+        "hidden constancy assumptions, quantities that may vary, invalid "
+        "algebra or calculus steps, and conclusions that fail at boundaries "
+        "or limiting cases."
+    ),
+)
+
+DEBATE_ALTERNATIVE_METHOD_ROLE_PROMPT = PromptTemplate(
+    name="workflow.debate.role.alternative_method",
+    version="1.0.0",
+    template=(
+        "Act as the alternative-method verifier. Avoid the most obvious "
+        "solution path when possible; use a second derivation, invariant, "
+        "counterexample, dimensional check, or endpoint behavior to try to "
+        "falsify the apparent answer."
+    ),
+)
+
+DEBATE_ADVERSARIAL_CHALLENGE_PROMPT = PromptTemplate(
+    name="workflow.debate.adversarial.challenge",
+    version="1.0.0",
+    template=(
+        "Do not treat agreement or confidence as evidence. Identify the most "
+        "consequential assumption or inference shared by these answers, build "
+        "the strongest plausible case for a different conclusion, and test "
+        "the disputed step using an independent method or limiting case. "
+        "Revise only after that challenge. Return your updated answer only."
+        "\n\nOther agents:\n$peer_answers"
+    ),
+)
+
+DEBATE_ADVERSARIAL_UNANIMOUS_PROMPT = PromptTemplate(
+    name="workflow.debate.adversarial.unanimous_challenge",
+    version="1.0.0",
+    template=(
+        "All visible agents currently agree. Treat this unanimity as a "
+        "correlated-error warning, not confirmation. Locate the shared "
+        "assumption that would make every answer fail, construct and test at "
+        "least one serious alternative conclusion, and re-derive the critical "
+        "step without copying the shared method. Return your updated answer "
+        "only.\n\nOther agents:\n$peer_answers"
+    ),
+)
+
+DEBATE_ADVERSARIAL_RESOLUTION_PROMPT = PromptTemplate(
+    name="workflow.debate.adversarial.resolution",
+    version="1.0.0",
+    template=(
+        "Resolve the competing claims by independently checking their critical "
+        "equations and assumptions. Give no weight to headcount. Prefer a "
+        "claim only when its derivation, counterexample, or boundary behavior "
+        "survives verification. Return your best updated answer only."
+        "\n\nOther agents:\n$peer_answers"
+    ),
+)
+
 SUPERVISOR_REVIEW_PROMPT = PromptTemplate(
     name="workflow.supervisor.review",
     version="2.0.0",

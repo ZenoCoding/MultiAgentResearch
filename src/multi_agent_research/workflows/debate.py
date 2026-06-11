@@ -6,6 +6,7 @@ from multi_agent_research.aggregation import (
     aggregate_votes,
     AggregationMode,
     JudgeTieBreakRequired,
+    normalize_answer,
     VALID_AGGREGATION_MODES,
     VotingConfig,
 )
@@ -13,11 +14,18 @@ from multi_agent_research.context import CompletionSpec, RunContext, task_messag
 from multi_agent_research.models import (
     AgentSpec,
     Message,
+    PromptReference,
     PromptTemplate,
     TaskInput,
     WorkflowOutput,
 )
 from multi_agent_research.prompts import (
+    DEBATE_ADVERSARIAL_CHALLENGE_PROMPT,
+    DEBATE_ADVERSARIAL_RESOLUTION_PROMPT,
+    DEBATE_ADVERSARIAL_UNANIMOUS_PROMPT,
+    DEBATE_ALTERNATIVE_METHOD_ROLE_PROMPT,
+    DEBATE_ASSUMPTION_AUDITOR_ROLE_PROMPT,
+    DEBATE_DERIVATION_ROLE_PROMPT,
     DEBATE_REVIEW_PROMPT,
     JUDGE_SELECTION_PROMPT,
     TIE_BREAK_JUDGE_PROMPT,
@@ -38,6 +46,8 @@ VALID_PEER_VIEWS = {
     "answer_only",
     "answer_and_confidence",
 }
+DebateMode = Literal["standard", "adversarial"]
+VALID_DEBATE_MODES = {"standard", "adversarial"}
 
 
 class DebateWorkflow(Workflow):
@@ -56,6 +66,21 @@ class DebateWorkflow(Workflow):
         aggregation: AggregationMode = "judge",
         voting: VotingConfig | None = None,
         peer_view: PeerView = "full_response",
+        mode: DebateMode = "standard",
+        adversarial_role_prompts: tuple[PromptTemplate, ...] = (
+            DEBATE_DERIVATION_ROLE_PROMPT,
+            DEBATE_ASSUMPTION_AUDITOR_ROLE_PROMPT,
+            DEBATE_ALTERNATIVE_METHOD_ROLE_PROMPT,
+        ),
+        adversarial_challenge_prompt: PromptTemplate = (
+            DEBATE_ADVERSARIAL_CHALLENGE_PROMPT
+        ),
+        adversarial_unanimous_prompt: PromptTemplate = (
+            DEBATE_ADVERSARIAL_UNANIMOUS_PROMPT
+        ),
+        adversarial_resolution_prompt: PromptTemplate = (
+            DEBATE_ADVERSARIAL_RESOLUTION_PROMPT
+        ),
     ) -> None:
         if len(agents) < 2:
             raise ValueError("Debate requires at least two agents")
@@ -70,6 +95,10 @@ class DebateWorkflow(Workflow):
             raise ValueError("Judge aggregation or tie-breaking requires a judge")
         if peer_view not in VALID_PEER_VIEWS:
             raise ValueError(f"Unsupported peer view: {peer_view}")
+        if mode not in VALID_DEBATE_MODES:
+            raise ValueError(f"Unsupported debate mode: {mode}")
+        if mode == "adversarial" and not adversarial_role_prompts:
+            raise ValueError("Adversarial debate requires at least one role prompt")
         self.agents = agents
         self.judge = judge
         self.rounds = rounds
@@ -80,6 +109,11 @@ class DebateWorkflow(Workflow):
         self.aggregation = aggregation
         self.voting = voting or VotingConfig()
         self.peer_view = peer_view
+        self.mode = mode
+        self.adversarial_role_prompts = adversarial_role_prompts
+        self.adversarial_challenge_prompt = adversarial_challenge_prompt
+        self.adversarial_unanimous_prompt = adversarial_unanimous_prompt
+        self.adversarial_resolution_prompt = adversarial_resolution_prompt
 
     async def run(self, task: TaskInput, context: RunContext) -> str:
         context.emit("workflow_started", workflow=self.name)
@@ -88,9 +122,20 @@ class DebateWorkflow(Workflow):
                 CompletionSpec(
                     step=f"initial_{index}",
                     agent=agent,
-                    messages=task_messages(task, agent),
-                    prompt_references=[task.answer_spec.prompt_reference()],
-                    metadata={"phase": "initial", "agent_index": index},
+                    messages=task_messages(
+                        task,
+                        agent,
+                        self._role_messages(index),
+                    ),
+                    prompt_references=[
+                        *self._role_references(index),
+                        task.answer_spec.prompt_reference(),
+                    ],
+                    metadata={
+                        "phase": "initial",
+                        "agent_index": index,
+                        **self._role_metadata(index),
+                    },
                     track_answer=True,
                 )
                 for index, agent in enumerate(self.agents)
@@ -108,22 +153,38 @@ class DebateWorkflow(Workflow):
 
         for round_index in range(self.rounds):
             previous_answers = dict(answers)
+            round_prompt, round_strategy, answer_tally = self._round_prompt(
+                task,
+                previous_answers,
+                round_index,
+            )
+            if self.mode == "adversarial":
+                context.emit(
+                    "debate_round_strategy",
+                    round=round_index + 1,
+                    mode=self.mode,
+                    strategy=round_strategy,
+                    prompt_name=round_prompt.name,
+                    answer_tally=answer_tally,
+                )
             round_specs: list[CompletionSpec] = []
             for index, agent in enumerate(self.agents):
                 peer_text = self._peer_text(task, previous_answers, agent.id)
+                followups = [
+                    *self._role_messages(index),
+                    Message(
+                        role="assistant",
+                        content=previous_answers[agent.id],
+                    ),
+                    Message(
+                        role="user",
+                        content=round_prompt.render(peer_answers=peer_text),
+                    ),
+                ]
                 messages = task_messages(
                     task,
                     agent,
-                    [
-                        Message(
-                            role="assistant",
-                            content=previous_answers[agent.id],
-                        ),
-                        Message(
-                            role="user",
-                            content=self.debate_prompt.render(peer_answers=peer_text),
-                        ),
-                    ],
+                    followups,
                 )
                 round_specs.append(
                     CompletionSpec(
@@ -131,13 +192,16 @@ class DebateWorkflow(Workflow):
                         agent=agent,
                         messages=messages,
                         prompt_references=[
-                            self.debate_prompt.reference(),
+                            round_prompt.reference(),
+                            *self._role_references(index),
                             task.answer_spec.prompt_reference(),
                         ],
                         metadata={
                             "phase": "debate",
                             "round": round_index + 1,
                             "agent_index": index,
+                            "strategy": round_strategy,
+                            **self._role_metadata(index),
                         },
                         track_answer=True,
                     )
@@ -210,7 +274,7 @@ class DebateWorkflow(Workflow):
         return final_answer
 
     def config(self) -> dict[str, Any]:
-        return {
+        config = {
             "agents": [agent.model_dump() for agent in self.agents],
             "judge": self.judge.model_dump() if self.judge else None,
             "rounds": self.rounds,
@@ -219,13 +283,48 @@ class DebateWorkflow(Workflow):
             "voting": self.voting.model_dump(),
             "peer_view": self.peer_view,
         }
+        if self.mode == "adversarial":
+            config.update(
+                {
+                    "mode": self.mode,
+                    "adversarial_roles": [
+                    self._role_prompt(index).name
+                    for index in range(len(self.agents))
+                    ],
+                }
+            )
+        return config
 
     def prompt_templates(self) -> list[PromptTemplate]:
         return unique_prompts(
             [
                 *(system_prompt_template(agent) for agent in self.agents),
                 system_prompt_template(self.judge) if self.judge else None,
-                self.debate_prompt,
+                (
+                    self.debate_prompt
+                    if self.mode == "standard"
+                    else None
+                ),
+                *(
+                    self.adversarial_role_prompts
+                    if self.mode == "adversarial"
+                    else ()
+                ),
+                (
+                    self.adversarial_challenge_prompt
+                    if self.mode == "adversarial"
+                    else None
+                ),
+                (
+                    self.adversarial_unanimous_prompt
+                    if self.mode == "adversarial"
+                    else None
+                ),
+                (
+                    self.adversarial_resolution_prompt
+                    if self.mode == "adversarial"
+                    else None
+                ),
                 self.judge_prompt if self.aggregation == "judge" else None,
                 (
                     self.tie_break_judge_prompt
@@ -234,6 +333,73 @@ class DebateWorkflow(Workflow):
                 ),
             ]
         )
+
+    def _role_prompt(self, agent_index: int) -> PromptTemplate:
+        return self.adversarial_role_prompts[
+            agent_index % len(self.adversarial_role_prompts)
+        ]
+
+    def _role_messages(self, agent_index: int) -> list[Message]:
+        if self.mode != "adversarial":
+            return []
+        return [
+            Message(
+                role="user",
+                content=self._role_prompt(agent_index).template,
+            )
+        ]
+
+    def _role_references(self, agent_index: int) -> list[PromptReference]:
+        if self.mode != "adversarial":
+            return []
+        return [self._role_prompt(agent_index).reference()]
+
+    def _role_metadata(self, agent_index: int) -> dict[str, str]:
+        if self.mode != "adversarial":
+            return {}
+        return {"debate_role": self._role_prompt(agent_index).name}
+
+    def _round_prompt(
+        self,
+        task: TaskInput,
+        answers: dict[str, str],
+        round_index: int,
+    ) -> tuple[PromptTemplate, str, dict[str, int]]:
+        if self.mode == "standard":
+            return self.debate_prompt, "peer_review", {}
+
+        answer_tally = self._answer_tally(task, answers)
+        if round_index == 0 and len(answer_tally) == 1:
+            return (
+                self.adversarial_unanimous_prompt,
+                "unanimous_challenge",
+                answer_tally,
+            )
+        if round_index == 0:
+            return (
+                self.adversarial_challenge_prompt,
+                "adversarial_challenge",
+                answer_tally,
+            )
+        return (
+            self.adversarial_resolution_prompt,
+            "evidence_resolution",
+            answer_tally,
+        )
+
+    @staticmethod
+    def _answer_tally(
+        task: TaskInput,
+        answers: dict[str, str],
+    ) -> dict[str, int]:
+        tally: dict[str, int] = {}
+        for response in answers.values():
+            output = WorkflowOutput.from_response(response, task.answer_spec)
+            if not output.contract_valid:
+                continue
+            normalized = normalize_answer(output.answer, task.answer_spec)
+            tally[normalized] = tally.get(normalized, 0) + 1
+        return dict(sorted(tally.items()))
 
     def _peer_text(
         self,
@@ -257,3 +423,12 @@ class DebateWorkflow(Workflow):
                     visible += f"\nConfidence: {output.confidence:g}"
             peers.append(f"{peer_id}:\n{visible}")
         return "\n\n".join(peers)
+
+
+class AdversarialDebateWorkflow(DebateWorkflow):
+    name = "adversarial_debate"
+    version = "1.0.0"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["mode"] = "adversarial"
+        super().__init__(*args, **kwargs)

@@ -18,6 +18,12 @@ from multi_agent_research.models import (
 )
 from multi_agent_research.prompt_overrides import load_prompt_overrides, overridden
 from multi_agent_research.prompts import (
+    DEBATE_ADVERSARIAL_CHALLENGE_PROMPT,
+    DEBATE_ADVERSARIAL_RESOLUTION_PROMPT,
+    DEBATE_ADVERSARIAL_UNANIMOUS_PROMPT,
+    DEBATE_ALTERNATIVE_METHOD_ROLE_PROMPT,
+    DEBATE_ASSUMPTION_AUDITOR_ROLE_PROMPT,
+    DEBATE_DERIVATION_ROLE_PROMPT,
     DEBATE_REVIEW_PROMPT,
     JUDGE_SELECTION_PROMPT,
     JUDGE_SYSTEM_PROMPT,
@@ -30,6 +36,7 @@ from multi_agent_research.prompts import (
 from multi_agent_research.runner import ExperimentRunner
 from multi_agent_research.storage import FileRunStore
 from multi_agent_research.workflows import (
+    AdversarialDebateWorkflow,
     DebateWorkflow,
     IndependentSampleWorkflow,
     SelfCriticWorkflow,
@@ -170,8 +177,13 @@ def _workflow(
             aggregation=args.aggregation,
             voting=voting,
         )
-    if args.workflow == "debate":
-        return DebateWorkflow(
+    if args.workflow in {"debate", "adversarial-debate"}:
+        workflow_type = (
+            AdversarialDebateWorkflow
+            if args.workflow == "adversarial-debate"
+            else DebateWorkflow
+        )
+        return workflow_type(
             agents,
             judge,
             rounds=args.rounds,
@@ -191,6 +203,32 @@ def _workflow(
             aggregation=args.aggregation,
             voting=voting,
             peer_view=args.debate_peer_view,
+            adversarial_role_prompts=(
+                overridden(
+                    DEBATE_DERIVATION_ROLE_PROMPT,
+                    prompt_overrides,
+                ),
+                overridden(
+                    DEBATE_ASSUMPTION_AUDITOR_ROLE_PROMPT,
+                    prompt_overrides,
+                ),
+                overridden(
+                    DEBATE_ALTERNATIVE_METHOD_ROLE_PROMPT,
+                    prompt_overrides,
+                ),
+            ),
+            adversarial_challenge_prompt=overridden(
+                DEBATE_ADVERSARIAL_CHALLENGE_PROMPT,
+                prompt_overrides,
+            ),
+            adversarial_unanimous_prompt=overridden(
+                DEBATE_ADVERSARIAL_UNANIMOUS_PROMPT,
+                prompt_overrides,
+            ),
+            adversarial_resolution_prompt=overridden(
+                DEBATE_ADVERSARIAL_RESOLUTION_PROMPT,
+                prompt_overrides,
+            ),
         )
     if args.workflow == "supervisor":
         supervisor_system = overridden(
@@ -277,7 +315,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-explanation", action="store_true")
     parser.add_argument(
         "--workflow",
-        choices=["solo", "sample", "self-critic", "debate", "supervisor"],
+        choices=[
+            "solo",
+            "sample",
+            "self-critic",
+            "debate",
+            "adversarial-debate",
+            "supervisor",
+        ],
         default="solo",
     )
     parser.add_argument("--experiment-id", default="manual")

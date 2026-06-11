@@ -90,6 +90,27 @@ The task, gold answer, derivation, and distractor rationale are documented in
 end-to-end smoke baseline; it is not a substitute for the versioned HLE task
 set described in the experiment plan.
 
+Run the yo-yo mechanics smoke question through the same workflows:
+
+```bash
+./examples/run-yoyo-smoke-workflows.sh openai/gpt-5.4-nano
+```
+
+Its model-visible prompt and reference derivation are documented in
+[evals/smoke-yoyo-unwinding.md](evals/smoke-yoyo-unwinding.md).
+
+Run the matched `none` versus `medium` GPT-5.4 nano suites:
+
+```bash
+./examples/run-yoyo-reasoning-suites.sh
+```
+
+Run the separate adversarial-debate yo-yo comparison:
+
+```bash
+./examples/run-yoyo-adversarial-debate.sh
+```
+
 Reasoning effort is a first-class agent setting:
 
 ```bash
@@ -142,6 +163,28 @@ uv run mar \
 Available peer views are `full_response`, `answer_only`, and
 `answer_and_confidence`. The last mode requires `--include-confidence` to
 expose a reported confidence value.
+
+Adversarial debate is a separate workflow for testing correlated-error
+countermeasures without changing the standard debate control:
+
+```bash
+uv run mar \
+  --workflow adversarial-debate \
+  --agents 3 \
+  --rounds 2 \
+  --aggregation plurality_vote \
+  --vote-tie-break judge \
+  --model openai/gpt-5.4-nano \
+  --prompt "Solve this problem."
+```
+
+Its agents begin with different roles: first-principles derivation, assumption
+auditing, and alternative-method verification. If their initial answers are
+unanimous, round one treats agreement as a correlated-error warning and
+requires a serious alternative to be tested. Later rounds resolve claims by
+checking equations, assumptions, counterexamples, and boundary behavior
+rather than following headcount. Runs are stored as
+`adversarial_debate@1.0.0`, separately from standard `debate` runs.
 
 Independent sampling and debate share configurable aggregation:
 

@@ -22,6 +22,7 @@ from multi_agent_research.models import (
 from multi_agent_research.runner import ExperimentRunner
 from multi_agent_research.storage import FileRunStore
 from multi_agent_research.workflows import (
+    AdversarialDebateWorkflow,
     DebateWorkflow,
     IndependentSampleWorkflow,
     SelfCriticWorkflow,
@@ -262,6 +263,95 @@ async def test_debate_initial_answers_and_each_round_run_in_parallel():
         "judge",
     ]
     assert [call.sequence for call in result.calls] == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_adversarial_debate_diversifies_and_challenges_unanimity():
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=AdversarialDebateWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            rounds=2,
+            aggregation="plurality_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.final_answer == "B"
+    assert result.workflow.name == "adversarial_debate"
+    assert result.workflow.version == "1.0.0"
+    assert result.workflow.config["mode"] == "adversarial"
+    assert result.workflow.config["adversarial_roles"] == [
+        "workflow.debate.role.derivation",
+        "workflow.debate.role.assumption_auditor",
+        "workflow.debate.role.alternative_method",
+    ]
+    assert [
+        result.calls[index].prompt_references[0].name for index in range(3)
+    ] == result.workflow.config["adversarial_roles"]
+    assert {
+        result.calls[index].messages[-2].content for index in range(3)
+    } == {
+        prompt.template
+        for prompt in result.workflow.prompts
+        if prompt.name.startswith("workflow.debate.role.")
+    }
+    assert all(
+        result.calls[index].prompt_references[0].name
+        == "workflow.debate.adversarial.unanimous_challenge"
+        for index in range(3, 6)
+    )
+    assert all(
+        result.calls[index].prompt_references[0].name
+        == "workflow.debate.adversarial.resolution"
+        for index in range(6, 9)
+    )
+    strategy_events = [
+        event for event in result.events if event.type == "debate_round_strategy"
+    ]
+    assert [event.data["strategy"] for event in strategy_events] == [
+        "unanimous_challenge",
+        "evidence_resolution",
+    ]
+    assert strategy_events[0].data["answer_tally"] == {"a": 3}
+
+
+def test_adversarial_debate_has_separate_workflow_identity():
+    agents = [agent("a"), agent("b"), agent("c")]
+
+    standard = DebateWorkflow(agents, aggregation="plurality_vote")
+    adversarial = AdversarialDebateWorkflow(
+        agents,
+        aggregation="plurality_vote",
+    )
+
+    assert standard.spec().name == "debate"
+    assert adversarial.spec().name == "adversarial_debate"
+    assert "mode" not in standard.config()
+    assert adversarial.config()["mode"] == "adversarial"
+    assert standard.spec().fingerprint != adversarial.spec().fingerprint
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,18 @@ uv run mar \
   --prompt "Solve the problem and explain your answer."
 ```
 
+Browse persisted runs in the lightweight local trace viewer:
+
+```bash
+uv run mar view results
+```
+
+The viewer renders agents as rows and answer-producing phases as columns.
+Cross-examination runs additionally show each directed challenge, response,
+and verdict as a linked exchange with access to exact messages, metadata,
+tokens, and latency. It reads the existing run artifacts directly and does
+not require a database or import step.
+
 Run the same synthetic hard problem through all five workflows:
 
 ```bash

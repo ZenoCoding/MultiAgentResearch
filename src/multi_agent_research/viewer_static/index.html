@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M.A.R.T.</title>
+    <link rel="stylesheet" href="/style.css" />
+    <!-- Markdown and LaTeX Rendering Support -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="run-rail">
+        <header class="brand">
+          <div>
+            <h1>M.A.R.T.</h1>
+            <p>multi agent research terminal</p>
+          </div>
+        </header>
+        <label class="search">
+          <span>Filter runs</span>
+          <input id="run-filter" type="search" placeholder="experiment, task, workflow" />
+        </label>
+        <div id="run-list" class="run-list" aria-live="polite"></div>
+      </aside>
+
+      <section class="workspace">
+        <header id="run-summary" class="run-summary"></header>
+        <section class="board-panel">
+          <div class="section-heading">
+            <h2>Debate Board</h2>
+            <span id="board-caption"></span>
+          </div>
+          <div id="debate-board" class="debate-board"></div>
+        </section>
+        <section id="exchange-panel" class="exchange-panel">
+          <div class="section-heading">
+            <h2>Cross-Examination</h2>
+            <div class="verdict-key">
+              <span class="resolved">R</span> resolved
+              <span class="unresolved">U</span> unresolved
+              <span class="conceded">C</span> conceded
+            </div>
+          </div>
+          <div id="exchange-list" class="exchange-list"></div>
+        </section>
+        <footer id="agent-legend" class="agent-legend"></footer>
+      </section>
+
+      <aside class="inspector">
+        <header class="inspector-header">
+          <div class="inspector-title-row">
+            <div id="inspector-sigils" class="inspector-sigils"></div>
+            <div>
+              <p>Transcript Inspector</p>
+              <h2 id="inspection-title">Select a stage</h2>
+            </div>
+          </div>
+        </header>
+        <nav class="inspector-tabs" aria-label="Inspector sections">
+          <button data-tab="rendered" class="active">Rendered</button>
+          <button data-tab="messages">Messages</button>
+          <button data-tab="metadata">Metadata</button>
+          <button data-tab="usage">Usage</button>
+        </nav>
+        <div id="inspection-body" class="inspection-body">
+          Choose an answer card or cross-examination exchange.
+        </div>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

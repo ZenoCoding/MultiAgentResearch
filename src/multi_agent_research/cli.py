@@ -56,7 +56,11 @@ from multi_agent_research.workflows import (
 
 def main() -> None:
     load_dotenv()
+    if len(sys.argv) > 1 and sys.argv[1] == "view":
+        from multi_agent_research.viewer import main as viewer_main
 
+        viewer_main(sys.argv[2:])
+        return
     args = _parser().parse_args()
     result = asyncio.run(_run(args))
     print(

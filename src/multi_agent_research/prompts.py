@@ -24,6 +24,17 @@ JUDGE_SELECTION_PROMPT = PromptTemplate(
     ),
 )
 
+TIE_BREAK_JUDGE_PROMPT = PromptTemplate(
+    name="workflow.judge.tie_break",
+    version="1.0.0",
+    template=(
+        "The vote is tied among these final answers: $tied_answers. "
+        "Choose the best answer to the original task using the tied candidates' "
+        "reasoning. Your final answer must be one of the tied answers. "
+        "Follow the task's required answer format.\n\n$candidates"
+    ),
+)
+
 SELF_CRITIC_REVISION_PROMPT = PromptTemplate(
     name="workflow.self_critic.revision",
     version="1.0.0",

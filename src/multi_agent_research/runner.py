@@ -4,10 +4,12 @@ from time import monotonic
 import traceback
 from uuid import uuid4
 
+from multi_agent_research.aggregation import AggregationInconclusive
 from multi_agent_research.context import RunContext
 from multi_agent_research.llm import LLMClient
 from multi_agent_research.models import (
     CallError,
+    InconclusiveResult,
     RunMetrics,
     RunRequest,
     RunResult,
@@ -56,6 +58,7 @@ class ExperimentRunner:
         started_clock = monotonic()
         final_answer: str | None = None
         output: WorkflowOutput | None = None
+        inconclusive: InconclusiveResult | None = None
         error: CallError | None = None
         status = "success"
 
@@ -66,6 +69,17 @@ class ExperimentRunner:
                 task.answer_spec,
             )
             final_answer = output.answer
+        except AggregationInconclusive as exc:
+            status = "inconclusive"
+            inconclusive = InconclusiveResult(
+                type=type(exc).__name__,
+                message=str(exc),
+                details=exc.details,
+            )
+            context.emit(
+                "run_inconclusive",
+                inconclusive=inconclusive.model_dump(),
+            )
         except Exception as exc:
             status = "failed"
             error = CallError(
@@ -91,6 +105,7 @@ class ExperimentRunner:
             status=status,
             final_answer=final_answer,
             output=output,
+            inconclusive=inconclusive,
             error=error,
             started_at=started_at,
             ended_at=ended_at,

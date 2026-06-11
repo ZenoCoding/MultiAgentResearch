@@ -132,7 +132,7 @@ async def test_independent_samples_are_judged():
         "candidate",
         "aggregate",
     ]
-    assert result.workflow.version == "2.2.0"
+    assert result.workflow.version == "2.4.0"
     assert result.workflow.fingerprint
     assert result.calls[-1].prompt_references[0].name == ("workflow.judge.selection")
 
@@ -630,18 +630,196 @@ async def test_voting_tie_policy_is_explicit():
         ]
     )
 
-    failed = await ExperimentRunner(llm=llm).run(
+    result = await ExperimentRunner(llm=llm).run(
         task=task,
         workflow=IndependentSampleWorkflow(
             [agent("a"), agent("b")],
             aggregation="plurality_vote",
-            voting=VotingConfig(tie_break="error"),
+            voting=VotingConfig(tie_break="inconclusive"),
         ),
         experiment_id="experiment",
     )
 
-    assert failed.status == "failed"
-    assert "Voting tie" in failed.error.message
+    assert result.status == "inconclusive"
+    assert result.final_answer is None
+    assert result.error is None
+    assert result.inconclusive is not None
+    assert result.inconclusive.details["reason"] == "tie"
+    assert result.inconclusive.details["tally"] == {"a": 1, "b": 1}
+    assert len(result.inconclusive.details["ballots"]) == 2
+    event = next(
+        event for event in result.events if event.type == "run_inconclusive"
+    )
+    assert event.data["inconclusive"]["details"]["tied_answers"] == ["a", "b"]
+
+
+def test_legacy_error_tie_policy_normalizes_to_inconclusive():
+    voting = VotingConfig.model_validate({"tie_break": "error"})
+
+    assert voting.tie_break == "inconclusive"
+
+
+@pytest.mark.asyncio
+async def test_sampling_can_use_judge_only_to_break_a_tie():
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+    llm = FakeLLMClient(
+        [
+            "Reasoning A\n<final_answer>A</final_answer>",
+            "Reasoning B\n<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            judge=agent("judge"),
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="judge"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "success"
+    assert result.final_answer == "B"
+    assert [call.step for call in result.calls] == [
+        "sample_0",
+        "sample_1",
+        "tie_break_judge",
+    ]
+    assert result.calls[-1].prompt_references[0].name == "workflow.judge.tie_break"
+    vote_event = next(
+        event for event in result.events if event.type == "votes_aggregated"
+    )
+    assert vote_event.data["tie_break_applied"] == "judge"
+    assert vote_event.data["tied_answers"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_sampling_does_not_call_tie_break_judge_when_vote_has_winner():
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            judge=agent("judge"),
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="judge"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "success"
+    assert result.final_answer == "B"
+    assert result.metrics.model_calls == 3
+    assert all(call.step != "tie_break_judge" for call in result.calls)
+
+
+@pytest.mark.asyncio
+async def test_debate_can_use_judge_only_to_break_a_tie():
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=DebateWorkflow(
+            [agent("a"), agent("b")],
+            judge=agent("judge"),
+            rounds=1,
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="judge"),
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "success"
+    assert result.final_answer == "A"
+    assert result.calls[-1].step == "tie_break_judge"
+    assert result.metrics.model_calls == 5
+
+
+def test_judge_tie_break_requires_a_judge():
+    with pytest.raises(
+        ValueError,
+        match="Judge aggregation or tie-breaking requires a judge",
+    ):
+        IndependentSampleWorkflow(
+            [agent("a"), agent("b")],
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="judge"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_majority_without_consensus_is_inconclusive():
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A or B")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[AnswerChoice(label="A"), AnswerChoice(label="B")],
+        ),
+    )
+    llm = FakeLLMClient(
+        [
+            "<final_answer>A</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>B</final_answer>",
+            "<final_answer>A</final_answer>",
+        ]
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=IndependentSampleWorkflow(
+            [agent("a"), agent("b"), agent("c"), agent("d")],
+            aggregation="majority_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "inconclusive"
+    assert result.inconclusive is not None
+    assert result.inconclusive.details["reason"] == "no_strict_majority"
+    assert result.inconclusive.details["tally"] == {"a": 2, "b": 2}
 
 
 @pytest.mark.asyncio

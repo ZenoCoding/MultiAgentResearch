@@ -5,6 +5,7 @@ from typing import Any, Literal
 from multi_agent_research.aggregation import (
     aggregate_votes,
     AggregationMode,
+    JudgeTieBreakRequired,
     VALID_AGGREGATION_MODES,
     VotingConfig,
 )
@@ -19,11 +20,12 @@ from multi_agent_research.models import (
 from multi_agent_research.prompts import (
     DEBATE_REVIEW_PROMPT,
     JUDGE_SELECTION_PROMPT,
+    TIE_BREAK_JUDGE_PROMPT,
     system_prompt_template,
     unique_prompts,
 )
 from multi_agent_research.workflows.base import Workflow
-from multi_agent_research.workflows.sample import _judge_prompt
+from multi_agent_research.workflows.sample import _judge_prompt, _judge_vote_tie
 
 
 PeerView = Literal[
@@ -40,7 +42,7 @@ VALID_PEER_VIEWS = {
 
 class DebateWorkflow(Workflow):
     name = "debate"
-    version = "2.3.0"
+    version = "2.5.0"
 
     def __init__(
         self,
@@ -49,6 +51,7 @@ class DebateWorkflow(Workflow):
         rounds: int = 1,
         debate_prompt: PromptTemplate = DEBATE_REVIEW_PROMPT,
         judge_prompt: PromptTemplate = JUDGE_SELECTION_PROMPT,
+        tie_break_judge_prompt: PromptTemplate = TIE_BREAK_JUDGE_PROMPT,
         parallel: bool = True,
         aggregation: AggregationMode = "judge",
         voting: VotingConfig | None = None,
@@ -60,8 +63,11 @@ class DebateWorkflow(Workflow):
             raise ValueError("Debate rounds must be at least 1")
         if aggregation not in VALID_AGGREGATION_MODES:
             raise ValueError(f"Unsupported aggregation mode: {aggregation}")
-        if aggregation == "judge" and judge is None:
-            raise ValueError("Judge aggregation requires a judge")
+        if (
+            aggregation == "judge"
+            or (voting is not None and voting.tie_break == "judge")
+        ) and judge is None:
+            raise ValueError("Judge aggregation or tie-breaking requires a judge")
         if peer_view not in VALID_PEER_VIEWS:
             raise ValueError(f"Unsupported peer view: {peer_view}")
         self.agents = agents
@@ -69,6 +75,7 @@ class DebateWorkflow(Workflow):
         self.rounds = rounds
         self.debate_prompt = debate_prompt
         self.judge_prompt = judge_prompt
+        self.tie_break_judge_prompt = tie_break_judge_prompt
         self.parallel = parallel
         self.aggregation = aggregation
         self.voting = voting or VotingConfig()
@@ -149,12 +156,21 @@ class DebateWorkflow(Workflow):
             }
 
         if self.aggregation != "judge":
-            vote = aggregate_votes(
-                task=task,
-                candidates=list(answers.items()),
-                mode=self.aggregation,
-                config=self.voting,
-            )
+            try:
+                vote = aggregate_votes(
+                    task=task,
+                    candidates=list(answers.items()),
+                    mode=self.aggregation,
+                    config=self.voting,
+                )
+            except JudgeTieBreakRequired as tie:
+                return await _judge_vote_tie(
+                    task=task,
+                    context=context,
+                    judge=self.judge,
+                    prompt=self.tie_break_judge_prompt,
+                    details=tie.details,
+                )
             context.emit("votes_aggregated", **vote.model_dump())
             context.record_stage_answer(
                 step="aggregation",
@@ -211,6 +227,11 @@ class DebateWorkflow(Workflow):
                 system_prompt_template(self.judge) if self.judge else None,
                 self.debate_prompt,
                 self.judge_prompt if self.aggregation == "judge" else None,
+                (
+                    self.tie_break_judge_prompt
+                    if self.voting.tie_break == "judge"
+                    else None
+                ),
             ]
         )
 

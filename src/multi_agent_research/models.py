@@ -446,15 +446,22 @@ class StageAnswer(HarnessModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class InconclusiveResult(HarnessModel):
+    type: str
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunResult(HarnessModel):
     run_id: str
     experiment_id: str
     task_id: str
     workflow: WorkflowSpec
     provenance: RunProvenance
-    status: Literal["success", "failed"]
+    status: Literal["success", "inconclusive", "failed"]
     final_answer: str | None = None
     output: WorkflowOutput | None = None
+    inconclusive: InconclusiveResult | None = None
     error: CallError | None = None
     started_at: datetime
     ended_at: datetime

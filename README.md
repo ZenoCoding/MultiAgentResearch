@@ -79,6 +79,17 @@ uv run mar \
   --prompt "Solve the problem and explain your answer."
 ```
 
+Run the same synthetic hard problem through all five workflows:
+
+```bash
+./examples/run-baseline-workflows.sh openai/gpt-5.4-nano
+```
+
+The task, gold answer, derivation, and distractor rationale are documented in
+[evals/baseline-grid-parity.md](evals/baseline-grid-parity.md). This is an
+end-to-end smoke baseline; it is not a substitute for the versioned HLE task
+set described in the experiment plan.
+
 Reasoning effort is a first-class agent setting:
 
 ```bash
@@ -138,17 +149,18 @@ Independent sampling and debate share configurable aggregation:
 uv run mar \
   --workflow debate \
   --aggregation majority_vote \
-  --vote-tie-break error \
+  --vote-tie-break inconclusive \
   --agents 3 \
   --model openai/gpt-5.4-nano \
   --prompt "Solve this problem."
 ```
 
 Available modes are `judge`, `majority_vote`, and `plurality_vote`. Voting
-modes make no judge call. Tie handling is explicit: fail, choose the first
-candidate-order answer, or use a seeded random choice. Invalid formatted
-ballots can be excluded or fail the run. The complete tally and ballot records
-are saved as a `votes_aggregated` workflow event.
+modes normally make no judge call. Tie handling is explicit: record an
+inconclusive run, choose the first candidate-order answer, use a seeded random
+choice, or call a judge only when the top vote is tied. Invalid formatted
+ballots can be excluded or fail the run. Inconclusive runs retain the complete
+tally and ballot records without being classified as execution failures.
 
 The CLI default is `judge` for both independent sampling and debate. The
 aggregation judge receives the original task and every candidate's full

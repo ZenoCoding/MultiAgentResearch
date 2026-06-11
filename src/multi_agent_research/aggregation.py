@@ -7,7 +7,7 @@ import random
 import re
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from multi_agent_research.models import (
     AnswerSpec,
@@ -21,10 +21,29 @@ AggregationMode = Literal["judge", "majority_vote", "plurality_vote"]
 VALID_AGGREGATION_MODES = {"judge", "majority_vote", "plurality_vote"}
 
 
+class AggregationInconclusive(Exception):
+    def __init__(self, message: str, *, details: dict) -> None:
+        super().__init__(message)
+        self.details = details
+
+
+class JudgeTieBreakRequired(Exception):
+    def __init__(self, *, details: dict) -> None:
+        super().__init__("Voting tie requires judge resolution")
+        self.details = details
+
+
 class VotingConfig(HarnessModel):
-    tie_break: Literal["error", "first", "random"] = "error"
+    tie_break: Literal["inconclusive", "first", "random", "judge"] = "inconclusive"
     random_seed: int = 0
     invalid_ballot_policy: Literal["exclude", "error"] = "exclude"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_error_policy(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("tie_break") == "error":
+            return {**data, "tie_break": "inconclusive"}
+        return data
 
 
 class VoteBallot(HarnessModel):
@@ -77,15 +96,52 @@ def aggregate_votes(
         answer for answer, count in tally.items() if count == top_count
     )
 
-    if mode == "majority_vote" and top_count <= len(included) / 2:
-        raise ValueError(
+    if (
+        mode == "majority_vote"
+        and top_count <= len(included) / 2
+        and not (len(tied_answers) > 1 and config.tie_break == "judge")
+    ):
+        raise AggregationInconclusive(
             "No strict majority: "
-            + ", ".join(f"{answer}={count}" for answer, count in sorted(tally.items()))
+            + ", ".join(
+                f"{answer}={count}" for answer, count in sorted(tally.items())
+            ),
+            details=_inconclusive_details(
+                mode=mode,
+                tally=tally,
+                ballots=ballots,
+                included=included,
+                tied_answers=tied_answers,
+                reason="no_strict_majority",
+            ),
         )
 
     tie_break_applied: str | None = None
     if len(tied_answers) == 1:
         winner_normalized = tied_answers[0]
+    elif config.tie_break == "judge":
+        raise JudgeTieBreakRequired(
+            details=_inconclusive_details(
+                mode=mode,
+                tally=tally,
+                ballots=ballots,
+                included=included,
+                tied_answers=tied_answers,
+                reason="tie",
+            )
+        )
+    elif config.tie_break == "inconclusive":
+        raise AggregationInconclusive(
+            f"Voting tie between: {', '.join(tied_answers)}",
+            details=_inconclusive_details(
+                mode=mode,
+                tally=tally,
+                ballots=ballots,
+                included=included,
+                tied_answers=tied_answers,
+                reason="tie",
+            ),
+        )
     else:
         winner_normalized = _break_tie(
             task_id=task.id,
@@ -113,6 +169,26 @@ def aggregate_votes(
     )
 
 
+def _inconclusive_details(
+    *,
+    mode: Literal["majority_vote", "plurality_vote"],
+    tally: Counter[str],
+    ballots: list[VoteBallot],
+    included: list[VoteBallot],
+    tied_answers: list[str],
+    reason: Literal["no_strict_majority", "tie"],
+) -> dict:
+    return {
+        "aggregation": mode,
+        "reason": reason,
+        "tally": dict(sorted(tally.items())),
+        "valid_ballots": len(included),
+        "total_ballots": len(ballots),
+        "tied_answers": tied_answers,
+        "ballots": [ballot.model_dump() for ballot in ballots],
+    }
+
+
 def _ballot(
     candidate_id: str,
     response: str,
@@ -130,14 +206,14 @@ def _ballot(
         candidate_id=candidate_id,
         raw_response=response,
         answer=output.answer,
-        normalized_answer=_normalize_answer(output.answer, answer_spec),
+        normalized_answer=normalize_answer(output.answer, answer_spec),
         contract_valid=output.contract_valid,
         included=included,
         validation_errors=output.validation_errors,
     )
 
 
-def _normalize_answer(answer: str, answer_spec: AnswerSpec) -> str:
+def normalize_answer(answer: str, answer_spec: AnswerSpec) -> str:
     normalized = re.sub(r"\s+", " ", answer.strip())
     if answer_spec.type == "multiple_choice":
         labels = {
@@ -168,8 +244,6 @@ def _break_tie(
     ballots: list[VoteBallot],
     config: VotingConfig,
 ) -> str:
-    if config.tie_break == "error":
-        raise ValueError(f"Voting tie between: {', '.join(tied_answers)}")
     if config.tie_break == "first":
         return next(
             ballot.normalized_answer

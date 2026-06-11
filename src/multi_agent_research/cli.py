@@ -24,6 +24,7 @@ from multi_agent_research.prompts import (
     SELF_CRITIC_REVISION_PROMPT,
     SUPERVISOR_REVIEW_PROMPT,
     SUPERVISOR_SYSTEM_PROMPT,
+    TIE_BREAK_JUDGE_PROMPT,
     WORKER_REVISION_PROMPT,
 )
 from multi_agent_research.runner import ExperimentRunner
@@ -49,6 +50,9 @@ def main() -> None:
                 "status": result.status,
                 "final_answer": result.final_answer,
                 "output": result.output.model_dump() if result.output else None,
+                "inconclusive": (
+                    result.inconclusive.model_dump() if result.inconclusive else None
+                ),
                 "workflow": result.workflow.model_dump(),
                 "metrics": result.metrics.model_dump(),
                 "stage_answers": [
@@ -130,7 +134,7 @@ def _workflow(
         for index in range(args.agents)
     ]
     judge = None
-    if args.aggregation == "judge":
+    if args.aggregation == "judge" or args.vote_tie_break == "judge":
         judge_system = overridden(
             JUDGE_SYSTEM_PROMPT,
             prompt_overrides,
@@ -158,6 +162,10 @@ def _workflow(
                 JUDGE_SELECTION_PROMPT,
                 prompt_overrides,
             ),
+            tie_break_judge_prompt=overridden(
+                TIE_BREAK_JUDGE_PROMPT,
+                prompt_overrides,
+            ),
             parallel=not args.sequential,
             aggregation=args.aggregation,
             voting=voting,
@@ -173,6 +181,10 @@ def _workflow(
             ),
             judge_prompt=overridden(
                 JUDGE_SELECTION_PROMPT,
+                prompt_overrides,
+            ),
+            tie_break_judge_prompt=overridden(
+                TIE_BREAK_JUDGE_PROMPT,
                 prompt_overrides,
             ),
             parallel=not args.sequential,
@@ -324,8 +336,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--vote-tie-break",
-        choices=["error", "first", "random"],
-        default="error",
+        choices=["inconclusive", "first", "random", "judge", "error"],
+        default="inconclusive",
+        help=(
+            "Tie policy. 'error' is a deprecated alias for 'inconclusive'."
+        ),
     )
     parser.add_argument("--vote-seed", type=int, default=0)
     parser.add_argument(

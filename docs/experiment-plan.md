@@ -41,6 +41,7 @@ temperature is present.
 | D3-A | Three agents, one round, answer only | 6 | Interaction without reasoning exchange |
 | D3-R | Three agents, one round, full response | 6 | Interaction with reasoning exchange |
 | D3-C | Three agents, one round, answer and confidence | 6 | Confidence-signaling effect |
+| CX3-1 | Three-agent cross-examination, one round | 18 | Directed challenge-response interaction |
 
 Use plurality voting for the primary comparison so judge behavior is not
 confounded with agent interaction. Run judge aggregation as a separate
@@ -62,6 +63,13 @@ unanimous initial answers as possible correlated errors, and uses a later
 evidence-resolution round. Compare it directly with standard debate at the
 same agent count, round count, model settings, peer visibility, and
 aggregation policy.
+
+Treat cross-examination debate as a third, higher-compute condition rather than
+another prompt variant. It adds claim extraction, named challenge, direct
+response, challenger verdict, and private final-revision phases. For `N` agents
+and `R` rounds it makes `N * (3 + 3R)` calls before aggregation. Its primary
+controls should use matched measured-token budgets rather than assuming that a
+cross-examination round is comparable to a snapshot debate round.
 
 This paired within-run comparison measures whether communication changes
 correct answers to incorrect ones or incorrect answers to correct ones.
@@ -129,6 +137,7 @@ configuration:
   parameters
 - Agent count and debate rounds
 - Peer view: full response, final answer only, or answer plus confidence
+- Cross-examination routing and per-phase output-token caps
 - Aggregation method and tie policy
 - Prompt versions
 - Parallel or sequential execution

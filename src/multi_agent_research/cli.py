@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+import sys
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -18,6 +19,11 @@ from multi_agent_research.models import (
 )
 from multi_agent_research.prompt_overrides import load_prompt_overrides, overridden
 from multi_agent_research.prompts import (
+    CROSS_EXAMINATION_CHALLENGE_PROMPT,
+    CROSS_EXAMINATION_CLAIM_PROMPT,
+    CROSS_EXAMINATION_FINAL_REVISION_PROMPT,
+    CROSS_EXAMINATION_RESPONSE_PROMPT,
+    CROSS_EXAMINATION_VERDICT_PROMPT,
     DEBATE_ADVERSARIAL_CHALLENGE_PROMPT,
     DEBATE_ADVERSARIAL_RESOLUTION_PROMPT,
     DEBATE_ADVERSARIAL_UNANIMOUS_PROMPT,
@@ -38,6 +44,7 @@ from multi_agent_research.runner import ExperimentRunner
 from multi_agent_research.storage import FileRunStore
 from multi_agent_research.workflows import (
     AdversarialDebateWorkflow,
+    CrossExaminationDebateWorkflow,
     DebateWorkflow,
     IndependentSampleWorkflow,
     SelfCriticWorkflow,
@@ -49,6 +56,7 @@ from multi_agent_research.workflows import (
 
 def main() -> None:
     load_dotenv()
+
     args = _parser().parse_args()
     result = asyncio.run(_run(args))
     print(
@@ -189,7 +197,56 @@ def _workflow(
             aggregation=args.aggregation,
             voting=voting,
         )
-    if args.workflow in {"debate", "adversarial-debate"}:
+    if args.workflow in {
+        "debate",
+        "adversarial-debate",
+        "cross-examination-debate",
+    }:
+        if args.workflow == "cross-examination-debate":
+            return CrossExaminationDebateWorkflow(
+                agents,
+                judge,
+                rounds=args.rounds,
+                claim_prompt=overridden(
+                    CROSS_EXAMINATION_CLAIM_PROMPT,
+                    prompt_overrides,
+                ),
+                challenge_prompt=overridden(
+                    CROSS_EXAMINATION_CHALLENGE_PROMPT,
+                    prompt_overrides,
+                ),
+                response_prompt=overridden(
+                    CROSS_EXAMINATION_RESPONSE_PROMPT,
+                    prompt_overrides,
+                ),
+                verdict_prompt=overridden(
+                    CROSS_EXAMINATION_VERDICT_PROMPT,
+                    prompt_overrides,
+                ),
+                final_revision_prompt=overridden(
+                    CROSS_EXAMINATION_FINAL_REVISION_PROMPT,
+                    prompt_overrides,
+                ),
+                judge_prompt=overridden(
+                    JUDGE_SELECTION_PROMPT,
+                    prompt_overrides,
+                ),
+                semantic_vote_prompt=overridden(
+                    SHORT_ANSWER_SEMANTIC_VOTE_PROMPT,
+                    prompt_overrides,
+                ),
+                tie_break_judge_prompt=overridden(
+                    TIE_BREAK_JUDGE_PROMPT,
+                    prompt_overrides,
+                ),
+                parallel=not args.sequential,
+                aggregation=args.aggregation,
+                voting=voting,
+                claim_max_tokens=args.cross_exam_claim_max_tokens,
+                challenge_max_tokens=args.cross_exam_challenge_max_tokens,
+                response_max_tokens=args.cross_exam_response_max_tokens,
+                verdict_max_tokens=args.cross_exam_verdict_max_tokens,
+            )
         workflow_type = (
             AdversarialDebateWorkflow
             if args.workflow == "adversarial-debate"
@@ -337,6 +394,7 @@ def _parser() -> argparse.ArgumentParser:
             "self-critic",
             "debate",
             "adversarial-debate",
+            "cross-examination-debate",
             "supervisor",
         ],
         default="solo",
@@ -355,6 +413,10 @@ def _parser() -> argparse.ArgumentParser:
         default="full_response",
         help="Information from each peer shown during debate rounds.",
     )
+    parser.add_argument("--cross-exam-claim-max-tokens", type=int, default=240)
+    parser.add_argument("--cross-exam-challenge-max-tokens", type=int, default=120)
+    parser.add_argument("--cross-exam-response-max-tokens", type=int, default=160)
+    parser.add_argument("--cross-exam-verdict-max-tokens", type=int, default=80)
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--max-tokens", type=int)
     parser.add_argument(

@@ -59,6 +59,7 @@ calls, workflow results, and usage data. It currently includes:
 * Independent sampling with a judge
 * Self-critique and revision
 * Multi-agent debate with a judge
+* Adversarial and cross-examination debate
 * Supervisor-worker revision
 
 Install the project:
@@ -184,7 +185,38 @@ unanimous, round one treats agreement as a correlated-error warning and
 requires a serious alternative to be tested. Later rounds resolve claims by
 checking equations, assumptions, counterexamples, and boundary behavior
 rather than following headcount. Runs are stored as
-`adversarial_debate@1.0.0`, separately from standard `debate` runs.
+`adversarial_debate@1.2.0`, separately from standard `debate` runs.
+
+Cross-examination debate is a separate interaction topology intended to
+produce targeted back-and-forth instead of parallel revised essays:
+
+```bash
+uv run mar \
+  --workflow cross-examination-debate \
+  --agents 3 \
+  --rounds 2 \
+  --aggregation plurality_vote \
+  --vote-tie-break judge \
+  --model openai/gpt-5.4-nano \
+  --prompt "Solve this problem."
+```
+
+Agents first solve privately and extract two critical claims, an assumption,
+and their weakest step. In each round, every agent challenges one named peer,
+the peer responds directly, and the challenger records a short
+`RESOLVED`/`UNRESOLVED`/`CONCEDED` verdict. Routing uses a rotating ring, so
+with three agents and two rounds each agent challenges both peers once. Agents
+then privately produce complete final revisions for aggregation.
+
+The claim, challenge, response, and verdict calls are mechanically capped at
+240, 120, 160, and 80 output tokens by default. Override those limits with the
+corresponding `--cross-exam-*-max-tokens` flags. Initial and final solutions use
+the normal model parameters. Only those initial and final solutions are
+recorded as candidate `stage_answers`; every dialogue turn remains available in
+`calls.jsonl` and `events.jsonl`. Runs are stored as
+`cross_examination_debate@1.1.0`. Version 1.1 traces also attach stable phase
+and interaction IDs plus explicit dependency and visibility call IDs to every
+exchange step. The viewer remains compatible with 1.0 traces.
 
 Independent sampling and debate share configurable aggregation:
 

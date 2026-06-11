@@ -146,6 +146,79 @@ DEBATE_ADVERSARIAL_RESOLUTION_PROMPT = PromptTemplate(
     ),
 )
 
+CROSS_EXAMINATION_CLAIM_PROMPT = PromptTemplate(
+    name="workflow.cross_examination.claims",
+    version="1.0.0",
+    template=(
+        "Extract the argumentative core of your proposed solution. Do not repeat "
+        "the full solution and do not revise it yet. Return exactly two critical "
+        "claims, the most important assumption, and the weakest step using this "
+        "format:\n"
+        "<claim id=\"C1\">...</claim>\n"
+        "<claim id=\"C2\">...</claim>\n"
+        "<assumption>...</assumption>\n"
+        "<weakest_step>...</weakest_step>"
+    ),
+)
+
+CROSS_EXAMINATION_CHALLENGE_PROMPT = PromptTemplate(
+    name="workflow.cross_examination.challenge",
+    version="1.1.0",
+    template=(
+        "Cross-examine $target_agent. Select one specific claim, assumption, or "
+        "step below that could change the final answer. Even if you initially agree on the final answer, "
+        "treat that agreement as a correlated-error warning. Be highly critical: actively search for "
+        "hidden constancy assumptions, ignored terms (such as in kinematics or derivatives), or simplifications "
+        "that could fail at the boundaries. Ask one precise question or give one concrete counterexample, "
+        "derivation check, or boundary test. Do not restate your full solution. Address $target_agent directly "
+        "and return only the challenge.\n\n"
+        "$target_agent initial solution:\n$target_initial\n\n"
+        "$target_agent claim dossier:\n$target_claims\n\n"
+        "Prior cross-examination transcript:\n$prior_transcript"
+    ),
+)
+
+CROSS_EXAMINATION_RESPONSE_PROMPT = PromptTemplate(
+    name="workflow.cross_examination.response",
+    version="1.1.0",
+    template=(
+        "$challenger_agent challenged you as follows:\n$challenge\n\n"
+        "Answer that exact challenge directly. Defend your solution rigorously. Do not concede "
+        "merely because the challenger presents a different model or formula; double-check your own "
+        "fundamental conservation laws (e.g., energy, momentum) and boundary behavior first. Only "
+        "concede if you identify an explicit, undeniable logical or mathematical error in your own "
+        "derivation. Do not restate your full solution. Return only the response.\n\n"
+        "Prior cross-examination transcript:\n$prior_transcript"
+    ),
+)
+
+CROSS_EXAMINATION_VERDICT_PROMPT = PromptTemplate(
+    name="workflow.cross_examination.verdict",
+    version="1.1.0",
+    template=(
+        "You challenged $target_agent:\n$challenge\n\n"
+        "$target_agent responded:\n$response\n\n"
+        "Judge strictly whether the response fully and correctly resolved your challenge. Be highly "
+        "skeptical: do not accept hand-waving, unverified simplifications, or unproven assumptions. "
+        "Begin with exactly RESOLVED, UNRESOLVED, or CONCEDED, followed by one short sentence of justification."
+    ),
+)
+
+CROSS_EXAMINATION_FINAL_REVISION_PROMPT = PromptTemplate(
+    name="workflow.cross_examination.final_revision",
+    version="1.1.0",
+    template=(
+        "Privately revise your solution after the cross-examination transcript "
+        "below. Do not follow headcount and do not assume a challenge is resolved "
+        "just because a peer claimed it was. Perform a ground-up independent re-derivation "
+        "of any critical physics or mathematical steps yourself to verify them from first "
+        "principles before deciding. Return your complete final solution.\n\n"
+        "Your initial solution:\n$initial_response\n\n"
+        "Your claim dossier:\n$claims\n\n"
+        "Cross-examination transcript:\n$transcript"
+    ),
+)
+
 SUPERVISOR_REVIEW_PROMPT = PromptTemplate(
     name="workflow.supervisor.review",
     version="2.0.0",

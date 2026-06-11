@@ -23,6 +23,7 @@ from multi_agent_research.runner import ExperimentRunner
 from multi_agent_research.storage import FileRunStore
 from multi_agent_research.workflows import (
     AdversarialDebateWorkflow,
+    CrossExaminationDebateWorkflow,
     DebateWorkflow,
     IndependentSampleWorkflow,
     SelfCriticWorkflow,
@@ -160,7 +161,11 @@ async def test_independent_samples_run_in_parallel_with_stable_call_order():
 
     assert llm.max_active_calls == 2
     assert result.final_answer == "judged answer"
-    assert [call.step for call in result.calls] == ["sample_0", "sample_1", "judge"]
+    assert [call.step for call in result.calls] == [
+        "sample_0",
+        "sample_1",
+        "judge",
+    ]
     assert [call.sequence for call in result.calls] == [0, 1, 2]
 
 
@@ -429,6 +434,7 @@ async def test_debate_uses_peer_answers_then_judges():
     assert "initial b" in llm.requests[2][-2].content
     assert "initial a" in llm.requests[3][-2].content
     assert result.calls[2].prompt_references[0].name == ("workflow.debate.peer_review")
+    assert result.calls[-1].prompt_references[0].name == "workflow.judge.selection"
 
 
 @pytest.mark.asyncio
@@ -590,6 +596,225 @@ def test_adversarial_debate_has_separate_workflow_identity():
     assert "mode" not in standard.config()
     assert adversarial.config()["mode"] == "adversarial"
     assert standard.spec().fingerprint != adversarial.spec().fingerprint
+
+
+@pytest.mark.asyncio
+async def test_cross_examination_uses_directed_short_exchanges_then_revises():
+    llm = FakeLLMClient(
+        [
+            "Initial A\n<final_answer>A</final_answer>",
+            "Initial B\n<final_answer>B</final_answer>",
+            "Initial C\n<final_answer>C</final_answer>",
+            "<claim id=\"C1\">A1</claim>",
+            "<claim id=\"C1\">B1</claim>",
+            "<claim id=\"C1\">C1</claim>",
+            "A challenges B1",
+            "B challenges C1",
+            "C challenges A1",
+            "B answers A",
+            "C answers B",
+            "A answers C",
+            "UNRESOLVED B did not justify B1.",
+            "RESOLVED C justified C1.",
+            "CONCEDED A withdrew A1.",
+            "Final A\n<final_answer>A</final_answer>",
+            "Final B\n<final_answer>B</final_answer>",
+            "Final B\n<final_answer>B</final_answer>",
+        ]
+    )
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A, B, or C")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[
+                AnswerChoice(label="A"),
+                AnswerChoice(label="B"),
+                AnswerChoice(label="C"),
+            ],
+        ),
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=CrossExaminationDebateWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            rounds=1,
+            aggregation="plurality_vote",
+        ),
+        experiment_id="experiment",
+    )
+
+    assert result.status == "success"
+    assert result.final_answer == "B"
+    assert result.workflow.name == "cross_examination_debate"
+    assert result.workflow.version == "1.1.0"
+    assert result.workflow.config["routing"] == "rotating_ring"
+    assert result.metrics.model_calls == 18
+    assert [call.step for call in result.calls] == [
+        "initial_0",
+        "initial_1",
+        "initial_2",
+        "claims_0",
+        "claims_1",
+        "claims_2",
+        "cross_exam_1_challenge_0",
+        "cross_exam_1_challenge_1",
+        "cross_exam_1_challenge_2",
+        "cross_exam_1_response_0",
+        "cross_exam_1_response_1",
+        "cross_exam_1_response_2",
+        "cross_exam_1_verdict_0",
+        "cross_exam_1_verdict_1",
+        "cross_exam_1_verdict_2",
+        "final_revision_0",
+        "final_revision_1",
+        "final_revision_2",
+    ]
+    assert [stage.step for stage in result.stage_answers] == [
+        "initial_0",
+        "initial_1",
+        "initial_2",
+        "final_revision_0",
+        "final_revision_1",
+        "final_revision_2",
+        "aggregation",
+    ]
+
+    challenge = result.calls[6]
+    assert challenge.agent_id == "a"
+    assert challenge.metadata["target_id"] == "b"
+    assert "max_tokens" not in challenge.request_parameters
+    challenge_text = challenge.messages[-1].content
+    assert isinstance(challenge_text, str)
+    assert "Cross-examine b" in challenge_text
+    assert "Initial B" in challenge_text
+    assert "Your response should be under 120 tokens." in challenge_text
+    challenger_context = challenge.messages[-2].content
+    assert isinstance(challenger_context, str)
+    assert "Initial A" in challenger_context
+    assert "A1" in challenger_context
+
+    response = result.calls[9]
+    assert response.agent_id == "b"
+    assert response.metadata["challenger_id"] == "a"
+    assert "max_tokens" not in response.request_parameters
+    assert "Your response should be under 160 tokens." in response.messages[-1].content
+    assert "max_tokens" not in result.calls[12].request_parameters
+    assert "Your response should be under 80 tokens." in result.calls[12].messages[-1].content
+
+    final_a = result.calls[15].messages[-2].content
+    assert isinstance(final_a, str)
+    assert "A challenges B1" in final_a
+    assert "C challenges A1" in final_a
+    exchange_events = [
+        event
+        for event in result.events
+        if event.type == "cross_examination_exchange"
+    ]
+    assert len(exchange_events) == 3
+    assert exchange_events[0].data["challenge_call_id"] == result.calls[6].id
+    assert result.calls[9].metadata["depends_on_call_ids"] == [result.calls[6].id]
+    assert result.calls[12].metadata["depends_on_call_ids"] == [
+        result.calls[6].id,
+        result.calls[9].id,
+    ]
+    assert set(result.calls[15].metadata["visible_call_ids"]) == {
+        result.calls[0].id,
+        result.calls[3].id,
+        result.calls[6].id,
+        result.calls[8].id,
+        result.calls[9].id,
+        result.calls[11].id,
+        result.calls[12].id,
+        result.calls[14].id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_cross_examination_second_round_rotates_and_keeps_transcript():
+    llm = FakeLLMClient(
+        [
+            *[
+                f"Initial {label}\n<final_answer>{label}</final_answer>"
+                for label in ("A", "B", "C")
+            ],
+            *[f"<claim id=\"C1\">{label}1</claim>" for label in ("A", "B", "C")],
+            *["A->B challenge", "B->C challenge", "C->A challenge"],
+            *["B response", "C response", "A response"],
+            *["RESOLVED one", "RESOLVED two", "RESOLVED three"],
+            *["A->C challenge", "B->A challenge", "C->B challenge"],
+            *["C second response", "A second response", "B second response"],
+            *["RESOLVED four", "RESOLVED five", "RESOLVED six"],
+            *[
+                f"Final {label}\n<final_answer>{label}</final_answer>"
+                for label in ("A", "B", "C")
+            ],
+        ]
+    )
+    task = TaskInput(
+        id="task-1",
+        messages=[Message(role="user", content="Choose A, B, or C")],
+        answer_spec=AnswerSpec(
+            type="multiple_choice",
+            choices=[
+                AnswerChoice(label="A"),
+                AnswerChoice(label="B"),
+                AnswerChoice(label="C"),
+            ],
+        ),
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=task,
+        workflow=CrossExaminationDebateWorkflow(
+            [agent("a"), agent("b"), agent("c")],
+            rounds=2,
+            aggregation="plurality_vote",
+            voting=VotingConfig(tie_break="first"),
+        ),
+        experiment_id="experiment",
+    )
+
+    second_challenge = next(
+        call for call in result.calls if call.step == "cross_exam_2_challenge_0"
+    )
+    assert second_challenge.metadata["challenger_id"] == "a"
+    assert second_challenge.metadata["target_id"] == "c"
+    second_challenge_text = second_challenge.messages[-1].content
+    assert isinstance(second_challenge_text, str)
+    assert "Round 1: a -> b" in second_challenge_text
+
+    second_response = next(
+        call for call in result.calls if call.step == "cross_exam_2_response_0"
+    )
+    second_response_text = second_response.messages[-1].content
+    assert isinstance(second_response_text, str)
+    assert "Round 1: b -> c" in second_response_text
+    assert "Round 1: c -> a" in second_response_text
+
+
+def test_cross_examination_rounds_rotate_targets_and_change_identity():
+    agents = [agent("a"), agent("b"), agent("c")]
+    one_round = CrossExaminationDebateWorkflow(
+        agents,
+        aggregation="plurality_vote",
+        rounds=1,
+    )
+    two_rounds = CrossExaminationDebateWorkflow(
+        agents,
+        aggregation="plurality_vote",
+        rounds=2,
+    )
+
+    assert one_round.spec().fingerprint != two_rounds.spec().fingerprint
+    assert two_rounds.config()["rounds"] == 2
+    assert two_rounds.config()["phase_max_tokens"] == {
+        "claims": 240,
+        "challenge": 120,
+        "response": 160,
+        "verdict": 80,
+    }
 
 
 @pytest.mark.asyncio

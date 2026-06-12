@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 from uuid import uuid4
 
 from multi_agent_research.models import RunRequest, RunResult
@@ -19,65 +20,73 @@ class FileRunStore:
         *,
         source_snapshot: bytes,
     ) -> Path:
-        run_dir = self.root / request.experiment_id / request.id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        source_path = self._cache_source_snapshot(
-            request.provenance.source_snapshot_sha256,
-            source_snapshot,
-        )
+        experiment_dir = self.root / request.experiment_id
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        run_dir = experiment_dir / request.id
+        temporary_dir = experiment_dir / f".{request.id}.{uuid4()}.tmp"
+        temporary_dir.mkdir()
 
-        (run_dir / "request.json").write_text(
-            request.model_dump_json(indent=2),
-            encoding="utf-8",
-        )
-        (run_dir / "result.json").write_text(
-            result.model_dump_json(indent=2),
-            encoding="utf-8",
-        )
-        (run_dir / "provenance.json").write_text(
-            request.provenance.model_dump_json(indent=2),
-            encoding="utf-8",
-        )
-        (run_dir / "source-reference.json").write_text(
-            json.dumps(
-                {
-                    "sha256": request.provenance.source_snapshot_sha256,
-                    "path": source_path.relative_to(self.root).as_posix(),
-                    "size_bytes": source_path.stat().st_size,
-                },
-                indent=2,
-                sort_keys=True,
+        try:
+            source_path = self._cache_source_snapshot(
+                request.provenance.source_snapshot_sha256,
+                source_snapshot,
             )
-            + "\n",
-            encoding="utf-8",
-        )
-        self._write_jsonl(
-            run_dir / "calls.jsonl",
-            [call.model_dump_json() for call in result.calls],
-        )
-        self._write_jsonl(
-            run_dir / "events.jsonl",
-            [event.model_dump_json() for event in result.events],
-        )
-        artifact_paths = [
-            run_dir / "request.json",
-            run_dir / "result.json",
-            run_dir / "provenance.json",
-            run_dir / "source-reference.json",
-            run_dir / "calls.jsonl",
-            run_dir / "events.jsonl",
-        ]
-        manifest = {
-            path.name: {
-                "sha256": sha256(path.read_bytes()).hexdigest(),
-                "size_bytes": path.stat().st_size,
+            (temporary_dir / "request.json").write_text(
+                request.model_dump_json(indent=2),
+                encoding="utf-8",
+            )
+            (temporary_dir / "result.json").write_text(
+                result.model_dump_json(indent=2),
+                encoding="utf-8",
+            )
+            (temporary_dir / "provenance.json").write_text(
+                request.provenance.model_dump_json(indent=2),
+                encoding="utf-8",
+            )
+            (temporary_dir / "source-reference.json").write_text(
+                json.dumps(
+                    {
+                        "sha256": request.provenance.source_snapshot_sha256,
+                        "path": source_path.relative_to(self.root).as_posix(),
+                        "size_bytes": source_path.stat().st_size,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self._write_jsonl(
+                temporary_dir / "calls.jsonl",
+                [call.model_dump_json() for call in result.calls],
+            )
+            self._write_jsonl(
+                temporary_dir / "events.jsonl",
+                [event.model_dump_json() for event in result.events],
+            )
+            artifact_paths = [
+                temporary_dir / "request.json",
+                temporary_dir / "result.json",
+                temporary_dir / "provenance.json",
+                temporary_dir / "source-reference.json",
+                temporary_dir / "calls.jsonl",
+                temporary_dir / "events.jsonl",
+            ]
+            manifest = {
+                path.name: {
+                    "sha256": sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+                for path in artifact_paths
             }
-            for path in artifact_paths
-        }
-        (run_dir / "artifact-manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+            (temporary_dir / "artifact-manifest.json").write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            temporary_dir.replace(run_dir)
+        except BaseException:
+            shutil.rmtree(temporary_dir, ignore_errors=True)
+            raise
         return run_dir
 
     def _cache_source_snapshot(

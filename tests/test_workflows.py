@@ -109,6 +109,34 @@ async def test_source_snapshot_is_cached_across_runs(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_store_does_not_expose_partial_run_directory(
+    tmp_path,
+    monkeypatch,
+):
+    store = FileRunStore(tmp_path)
+
+    def fail_write(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise OSError("disk write failed")
+
+    monkeypatch.setattr(store, "_write_jsonl", fail_write)
+    runner = ExperimentRunner(
+        llm=FakeLLMClient(["answer"]),
+        store=store,
+    )
+
+    with pytest.raises(OSError, match="disk write failed"):
+        await runner.run(
+            task=TaskInput.from_prompt(id="task-1", prompt="Question"),
+            workflow=SoloWorkflow(agent("solo")),
+            experiment_id="atomic-save",
+        )
+
+    experiment_dir = tmp_path / "atomic-save"
+    assert experiment_dir.exists()
+    assert list(experiment_dir.iterdir()) == []
+
+
+@pytest.mark.asyncio
 async def test_independent_samples_are_judged():
     llm = FakeLLMClient(["answer a", "answer b", "answer b"])
     workflow = IndependentSampleWorkflow(
@@ -141,6 +169,44 @@ async def test_independent_samples_are_judged():
     assert result.workflow.version == "2.6.0"
     assert result.workflow.fingerprint
     assert result.calls[-1].prompt_references[0].name == "workflow.judge.selection"
+
+
+@pytest.mark.asyncio
+async def test_single_short_answer_sample_does_not_call_semantic_judge():
+    llm = FakeLLMClient(
+        ["reasoning\n<final_answer>alpha</final_answer>"]
+    )
+    workflow = IndependentSampleWorkflow(
+        [agent("a")],
+        agent("judge"),
+        aggregation="plurality_vote",
+        voting=VotingConfig(tie_break="judge"),
+    )
+
+    result = await ExperimentRunner(llm=llm).run(
+        task=TaskInput.from_prompt(
+            id="task-1",
+            prompt="Question",
+            answer_spec=AnswerSpec(type="short_answer"),
+        ),
+        workflow=workflow,
+        experiment_id="experiment",
+    )
+
+    assert result.status == "success"
+    assert result.final_answer == "alpha"
+    assert [call.step for call in result.calls] == ["sample_0"]
+    assert result.stage_answers[-1].metadata["judge_objective"] == (
+        "single_ballot_passthrough"
+    )
+    assert [stage.step for stage in result.stage_answers] == [
+        "sample_0",
+        "aggregation",
+    ]
+    assert [stage.kind for stage in result.stage_answers] == [
+        "candidate",
+        "aggregate",
+    ]
 
 
 @pytest.mark.asyncio

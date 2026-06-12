@@ -23,11 +23,14 @@ gold-free `TaskInput` objects and does not load, filter, sample, or score HLE.
 ## Pilot requirements
 
 Sarah's experiment layer supplies a fixed, versioned task set and experiment
-manifest. For the first study, the requested task-set properties are 100
-text-only, multiple-choice HLE questions with recorded task IDs, sampling
-method, seed, and subject distribution. Multiple choice keeps plurality
-aggregation objective and avoids treating semantically equivalent short answers
-as different votes.
+manifest. The infrastructure pilot uses a deterministic 40-question HLE subset
+sampled proportionally by subject and then by canonical answer type within each
+subject. This preserves both multiple-choice and short-answer representation.
+Report the two answer types separately: multiple choice provides objective
+voting, while short answer requires semantic grouping during aggregation.
+Final and stage correctness for both answer types use the versioned HLE
+semantic grading judge so all accuracy and revision metrics share one grading
+contract.
 
 Use one primary model, fixed generation parameters, and the same questions for
 every condition. Run three repetitions when provider nondeterminism or a nonzero
@@ -96,6 +99,12 @@ The workflow aggregation judge and the HLE grading judge are different:
   answer type.
 - The HLE grading judge belongs to the benchmark layer. It sees the model
   response and reference answer and decides whether they match.
+
+The HLE grader follows the official structured contract and stores the
+extracted answer, binary correctness, grading reasoning, confidence, model,
+prompt fingerprint, usage, and full call provenance. Grading is resumable and
+cached by task and full response. A mixed-HLE report must not fall back to
+normalized exact matching when semantic grades are missing.
 
 Voting extracts each candidate's final answer and selects by strict majority
 or plurality. Canonical answers such as multiple-choice labels are normalized

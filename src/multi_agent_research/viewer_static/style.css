@@ -293,11 +293,15 @@ button {
 }
 
 .board-header {
-  min-height: 42px;
+  min-height: 52px;
   color: var(--muted);
   font-size: 9px;
   text-align: center;
   text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 
 .agent-label {

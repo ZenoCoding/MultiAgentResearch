@@ -22,9 +22,38 @@ def write_charts(*, analysis_dir: Path | str, output_dir: Path | str) -> list[Pa
         output / "revision_transitions.svg",
         output / "question_heatmap.svg",
     ]
-    paths[0].write_text(bar_chart(summary["conditions"], "condition", "accuracy", "Accuracy by condition", percent=True), encoding="utf-8")
-    paths[1].write_text(scatter_chart(summary["conditions"], "cost_usd", "accuracy", "Cost vs accuracy", x_label="Cost USD", y_label="Accuracy"), encoding="utf-8")
-    paths[2].write_text(scatter_chart(summary["conditions"], "total_tokens", "accuracy", "Tokens vs accuracy", x_label="Total tokens", y_label="Accuracy"), encoding="utf-8")
+    paths[0].write_text(
+        bar_chart(
+            summary["conditions"],
+            "condition",
+            "planned_job_accuracy",
+            "Planned-job accuracy by condition",
+            percent=True,
+        ),
+        encoding="utf-8",
+    )
+    paths[1].write_text(
+        scatter_chart(
+            summary["conditions"],
+            "cost_usd",
+            "planned_job_accuracy",
+            "Cost vs planned-job accuracy",
+            x_label="Cost USD",
+            y_label="Planned-job accuracy",
+        ),
+        encoding="utf-8",
+    )
+    paths[2].write_text(
+        scatter_chart(
+            summary["conditions"],
+            "total_tokens",
+            "planned_job_accuracy",
+            "Tokens vs planned-job accuracy",
+            x_label="Total tokens",
+            y_label="Planned-job accuracy",
+        ),
+        encoding="utf-8",
+    )
     paths[3].write_text(counter_chart(summary["error_reasons"], "Incorrect answer reasons"), encoding="utf-8")
     paths[4].write_text(grouped_counter_chart(summary["revision_transitions"], "transition", "Revision transitions"), encoding="utf-8")
     paths[5].write_text(heatmap(summary["question_heatmap"], runs), encoding="utf-8")
@@ -84,8 +113,19 @@ def grouped_counter_chart(rows: list[dict[str, Any]], key: str, title: str) -> s
 
 def heatmap(rows: list[dict[str, Any]], run_rows: list[dict[str, Any]]) -> str:
     conditions = sorted({row["condition"] for row in rows})
-    tasks = sorted({row["task_id"] for row in rows})
-    lookup = {(row["task_id"], row["condition"]): row["correct"] for row in rows}
+    tasks = sorted(
+        {
+            f'{row["task_id"]} [r{row.get("repetition", 0)}]'
+            for row in rows
+        }
+    )
+    lookup = {
+        (
+            f'{row["task_id"]} [r{row.get("repetition", 0)}]',
+            row["condition"],
+        ): row["correct"]
+        for row in rows
+    }
     cell = 20
     left = 180
     top = 80
@@ -132,4 +172,3 @@ text {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; 
 
 def _escape(value: Any) -> str:
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-

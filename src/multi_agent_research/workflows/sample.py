@@ -210,6 +210,34 @@ async def _judge_semantic_vote(
     included = [ballot for ballot in ballots if ballot.included]
     if not included:
         raise ValueError("Voting produced no valid ballots")
+    if len(included) == 1:
+        response = included[0].raw_response
+        output = WorkflowOutput.from_response(response, task.answer_spec)
+        if not output.contract_valid:
+            raise ValueError(
+                "Single valid ballot has an invalid answer contract: "
+                + ", ".join(output.validation_errors)
+            )
+        context.record_stage_answer(
+            step="aggregation",
+            response=response,
+            kind="aggregate",
+            metadata={
+                "aggregation": mode,
+                "judge_objective": "single_ballot_passthrough",
+            },
+        )
+        context.emit(
+            "votes_aggregated",
+            mode=mode,
+            winner=output.answer,
+            semantic=True,
+            valid_ballots=1,
+            total_ballots=len(ballots),
+            judge_called=False,
+        )
+        context.emit("workflow_completed", workflow=context.workflow_name)
+        return response
     valid_candidates = [
         (ballot.candidate_id, ballot.raw_response) for ballot in included
     ]

@@ -1,0 +1,84 @@
+{
+  "answer_type": null,
+  "input_path": "data/hle-all.jsonl",
+  "requested_sample_size": 40,
+  "sample_distribution": {
+    "answer_type": {
+      "multiple_choice": 11,
+      "short_answer": 29
+    },
+    "category": {
+      "Biology/Medicine": 4,
+      "Chemistry": 2,
+      "Computer Science/AI": 4,
+      "Engineering": 1,
+      "Humanities/Social Science": 4,
+      "Math": 18,
+      "Other": 3,
+      "Physics": 4
+    }
+  },
+  "sample_size": 40,
+  "sampling_strategy": "proportional",
+  "schema_version": "1",
+  "seed": 20260612,
+  "source_distribution": {
+    "answer_type": {
+      "multiple_choice": 514,
+      "short_answer": 1644
+    },
+    "category": {
+      "Biology/Medicine": 222,
+      "Chemistry": 101,
+      "Computer Science/AI": 224,
+      "Engineering": 64,
+      "Humanities/Social Science": 193,
+      "Math": 976,
+      "Other": 176,
+      "Physics": 202
+    }
+  },
+  "stratify_key": "category",
+  "task_ids": [
+    "668825f80a642802bdfeadfa",
+    "66ea814c5544860edb5aa9fa",
+    "66edf49c46d28f04618d6498",
+    "66f52a03c518a8eba1cf963e",
+    "66f83aed0d92e99048a4ae9d",
+    "66fb60f0fce3673bfc606f35",
+    "66fb75ded83ed7a299fdd136",
+    "66fc550fd90ebe461bfd0c94",
+    "66fd08fb8a146dd80cfb22c0",
+    "6700b2f1fa64315ed5204e61",
+    "670147f7dc193e3fa8260419",
+    "6702780d39fbddbbfdaffdf0",
+    "6702db18a423c5b9f9c1c49c",
+    "6704486baf0a436d92c65161",
+    "67055b15222ba55ab0b88431",
+    "670dab3f29ad02fff2ae1d9a",
+    "670e92583011a5b80bfb6c60",
+    "670eeb9c997568ed4298871e",
+    "670f00dc79750a6c73259f4d",
+    "670f8518ffa4ea9fb0cc5fea",
+    "670fd2a6232fc20b4433c4d7",
+    "6710f26eaa2039046e5aea6e",
+    "67169906187dc7ac4a7ae1a8",
+    "671ba19847e34cf4ed747b2d",
+    "671d279f3f722db6ba359bd3",
+    "671f449c879059a81a74468c",
+    "6720c10ac6e0d9a4953b636f",
+    "67218f865b0747ce2231d48c",
+    "672473c50c7275f41d6d1e63",
+    "6724900ad8246a7af6d54ff3",
+    "672faa45c5a8bce51676ee01",
+    "67302aea4c42a72918926160",
+    "6732ca5730bf2e525136b688",
+    "67330386bda81b2106f720dc",
+    "6733fe294a614b25db9b204a",
+    "673612eaff612f83700ec41f",
+    "6737321d90a20eb348edbe03",
+    "67400254c0ce9147b46fadfb",
+    "6766662d37a605e5d7cb9ee8",
+    "67d09fd38fd17c121c0b49ad"
+  ]
+}

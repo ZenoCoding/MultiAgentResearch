@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "experiment_id": "hle-representative-40-scaling-v1",
+  "tasks": "benchmarks/hle-representative-40/tasks.jsonl",
+  "repetitions": 1,
+  "defaults": {
+    "aggregation": "plurality_vote",
+    "vote_tie_break": "judge",
+    "debate_peer_view": "full_response",
+    "include_confidence": false
+  },
+  "families": {
+    "solo": {
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
+    "self_critic": [
+      {
+        "effort": "none",
+        "rounds": [
+          1,
+          5,
+          9
+        ]
+      },
+      {
+        "effort": "medium",
+        "rounds": [
+          1,
+          3,
+          5
+        ]
+      }
+    ],
+    "sampling": [
+      {
+        "effort": "none",
+        "agents": [
+          1,
+          6,
+          9
+        ]
+      },
+      {
+        "effort": "medium",
+        "agents": [
+          1,
+          6,
+          9
+        ]
+      }
+    ],
+    "debate": [
+      {
+        "effort": "none",
+        "agent_round_pairs": [
+          [
+            3,
+            1
+          ],
+          [
+            6,
+            1
+          ],
+          [
+            9,
+            1
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            6,
+            3
+          ]
+        ]
+      },
+      {
+        "effort": "medium",
+        "agent_round_pairs": [
+          [
+            3,
+            1
+          ],
+          [
+            6,
+            1
+          ],
+          [
+            9,
+            1
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            9,
+            3
+          ]
+        ]
+      }
+    ],
+    "supervisor_worker": [
+      {
+        "worker_effort": "none",
+        "supervisor_effort": "none",
+        "max_rounds": [
+          2,
+          5
+        ]
+      },
+      {
+        "worker_effort": "medium",
+        "supervisor_effort": "medium",
+        "max_rounds": [
+          2,
+          5
+        ]
+      },
+      {
+        "worker_effort": "high",
+        "supervisor_effort": "high",
+        "max_rounds": [
+          2,
+          5
+        ]
+      },
+      {
+        "worker_effort": "low",
+        "supervisor_effort": "high",
+        "max_rounds": [
+          5
+        ]
+      },
+      {
+        "worker_effort": "high",
+        "supervisor_effort": "low",
+        "max_rounds": [
+          5
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "cais/hle",
+    "purpose": "Compute scaling across workflow architecture and reasoning effort",
+    "task_mix": "Subject-proportional, with canonical MCQ and short-answer representation",
+    "scoring": "Versioned official-contract semantic HLE grading for canonical final and stage responses"
+  }
+}

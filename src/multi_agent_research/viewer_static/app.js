@@ -60,7 +60,6 @@ async function selectRun(runId) {
   renderSummary();
   renderBoard();
   renderExchanges();
-  renderLegend();
   renderInspector();
 }
 
@@ -90,11 +89,20 @@ function renderBoard() {
   const columns = `155px repeat(${phases.length}, minmax(130px, 1fr))`;
   const cells = [
     '<div class="board-cell board-header" style="grid-column:1;grid-row:1">Agent</div>',
-    ...phases.map((phase, phaseIndex) => `
-      <div class="board-cell board-header" style="grid-column:${phaseIndex + 2};grid-row:1">
-        ${escapeHtml(phase.label)}
-      </div>
-    `),
+    ...phases.map((phase, phaseIndex) => {
+      let headerText = escapeHtml(phase.label);
+      if (phase.id === "aggregate") {
+        const judgeAgent = state.run.agents.find((agent) => agent.role === "judge");
+        if (judgeAgent) {
+          headerText += ` <small style="display:block;font-size:9px;color:var(--muted);font-weight:normal;margin-top:2px;">${escapeHtml(judgeAgent.model || "")}</small>`;
+        }
+      }
+      return `
+        <div class="board-cell board-header" style="grid-column:${phaseIndex + 2};grid-row:1">
+          ${headerText}
+        </div>
+      `;
+    }),
   ];
   primaryAgents.forEach((agent, agentIndex) => {
     const gridRow = agentIndex + 2;
@@ -130,7 +138,7 @@ function renderBoard() {
   $("#debate-board").innerHTML = `
     <div
       class="board-grid"
-      style="grid-template-columns:${columns};grid-template-rows:42px repeat(${Math.max(primaryAgents.length, 1)}, 92px)"
+      style="grid-template-columns:${columns};grid-template-rows:52px repeat(${Math.max(primaryAgents.length, 1)}, 92px)"
     >
       ${cells.join("")}
     </div>
@@ -202,10 +210,7 @@ function renderExchanges() {
   renderAgentSigils();
 }
 
-function renderLegend() {
-  $("#agent-legend").innerHTML = state.run.agents.map((agent, index) => agentMarkup(agent, index)).join("");
-  renderAgentSigils();
-}
+// legend removed, details integrated into the board grid
 
 function agentMarkup(agent, index) {
   return `

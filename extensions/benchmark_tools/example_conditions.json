@@ -1,0 +1,45 @@
+{
+  "conditions": [
+    {
+      "id": "solo",
+      "workflow": "solo"
+    },
+    {
+      "id": "sample-3",
+      "workflow": "sample",
+      "agents": 3,
+      "aggregation": "plurality_vote"
+    },
+    {
+      "id": "sample-6",
+      "workflow": "sample",
+      "agents": 6,
+      "aggregation": "plurality_vote"
+    },
+    {
+      "id": "debate-3-full",
+      "workflow": "debate",
+      "agents": 3,
+      "rounds": 1,
+      "aggregation": "plurality_vote",
+      "debate_peer_view": "full_response"
+    },
+    {
+      "id": "debate-3-answer",
+      "workflow": "debate",
+      "agents": 3,
+      "rounds": 1,
+      "aggregation": "plurality_vote",
+      "debate_peer_view": "answer_only"
+    },
+    {
+      "id": "adversarial-debate-3",
+      "workflow": "adversarial-debate",
+      "agents": 3,
+      "rounds": 2,
+      "aggregation": "plurality_vote",
+      "debate_peer_view": "full_response"
+    }
+  ]
+}
+

@@ -1,0 +1,1495 @@
+{
+  "conditions": [
+    {
+      "accuracy": 0.023255813953488372,
+      "accuracy_per_dollar": 6.6194764192736635,
+      "accuracy_per_million_tokens": 4.3471267665636395,
+      "avg_wall_time_ms": 7948.27896995361,
+      "condition": "debate-3-answer",
+      "contract_valid_rate": 0.3953488372093023,
+      "correct": 1,
+      "cost_usd": 0.15106935000000002,
+      "input_tokens": 129978,
+      "output_tokens": 100059,
+      "reasoning_tokens": 0,
+      "runs": 43,
+      "total_tokens": 230037,
+      "workflow": "debate"
+    },
+    {
+      "accuracy": 0.0,
+      "accuracy_per_dollar": null,
+      "accuracy_per_million_tokens": null,
+      "avg_wall_time_ms": 54.355113833359304,
+      "condition": "debate-3-full",
+      "contract_valid_rate": 0.0,
+      "correct": 0,
+      "cost_usd": 0.0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "runs": 30,
+      "total_tokens": 0,
+      "workflow": "debate"
+    },
+    {
+      "accuracy": 0.0,
+      "accuracy_per_dollar": 0.0,
+      "accuracy_per_million_tokens": 0.0,
+      "avg_wall_time_ms": 3702.3054888501365,
+      "condition": "sample-3",
+      "contract_valid_rate": 0.18333333333333332,
+      "correct": 0,
+      "cost_usd": 0.08936515,
+      "input_tokens": 27132,
+      "output_tokens": 67151,
+      "reasoning_tokens": 0,
+      "runs": 60,
+      "total_tokens": 94283,
+      "workflow": "independent_sample"
+    },
+    {
+      "accuracy": 0.0,
+      "accuracy_per_dollar": null,
+      "accuracy_per_million_tokens": null,
+      "avg_wall_time_ms": 100.91324456661823,
+      "condition": "sample-6",
+      "contract_valid_rate": 0.0,
+      "correct": 0,
+      "cost_usd": 0.0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "runs": 30,
+      "total_tokens": 0,
+      "workflow": "independent_sample"
+    },
+    {
+      "accuracy": 0.014925373134328358,
+      "accuracy_per_dollar": 30.34744793136621,
+      "accuracy_per_million_tokens": 28.68370478731033,
+      "avg_wall_time_ms": 2915.2859981342717,
+      "condition": "solo",
+      "contract_valid_rate": 0.5522388059701493,
+      "correct": 1,
+      "cost_usd": 0.0329517,
+      "input_tokens": 10121,
+      "output_tokens": 24742,
+      "reasoning_tokens": 0,
+      "runs": 67,
+      "total_tokens": 34863,
+      "workflow": "solo"
+    }
+  ],
+  "error_reasons": {
+    "aggregation_error": 2,
+    "format_error": 165,
+    "model_error": 46,
+    "shared_reasoning_error": 15
+  },
+  "question_heatmap": [
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e8967ae99ca52dd4b94441"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e8d4736299517dd7a5da8c"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66e9b92578e89514d9ab6093"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66ec8ab4b489956467209e0c"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66ee1745f77f20ac4db1fd7b"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "66f0247d8777dcd82dba8253"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "670010ff77983eff561814b2"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6701c34caf50fa52ed36ff06"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Other",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67057e2f6ab7d0d880663551"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "670fb58f2ca6bea76e9354a7"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-answer",
+      "correct": 1,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671d91bcad7fb0793a0e93bd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671d9e9d29e7fde7166e474d"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671eb856c357c6b4f73592dd"
+    },
+    {
+      "category": "Physics",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Physics",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Physics",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Physics",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "671f6889490be3e9a159f485"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 1,
+      "task_id": "672455ce7a14971607e3d9f0"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6725592b4ee96e5b68bb383b"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Computer Science/AI",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67260a2a8f9ce8a272ed4e9a"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Engineering",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Engineering",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Engineering",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6728b69ce3c03cd66bc102fe"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "672d5a80f1800d2d85750a71"
+    },
+    {
+      "category": "Physics",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Physics",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Physics",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Physics",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "672fc00e13e5fbd332372f3f"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67315c7e7fcf9ea998467bd6"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Biology/Medicine",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6731fa3bb08cf72258a21348"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6738d62e37f41423112a76ba"
+    },
+    {
+      "category": "Physics",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Physics",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Physics",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Physics",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Physics",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67398780bcaf1e028b8576a2"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "6739e06f5a81384176dd28cd"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Chemistry",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "673ad4214ff8ec86c1487ed3"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "673e37db8d2811de2a83c135"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Humanities/Social Science",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "673fce92f7f86aa77259187a"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "677940d11be12d785a89f486"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-answer",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    },
+    {
+      "category": "Math",
+      "condition": "debate-3-full",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-3",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    },
+    {
+      "category": "Math",
+      "condition": "sample-6",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    },
+    {
+      "category": "Math",
+      "condition": "solo",
+      "correct": 0,
+      "task_id": "67a69b0bc85a56ef94b67f1e"
+    }
+  ],
+  "revision_transitions": [
+    {
+      "condition": "debate-3-answer",
+      "count": 1,
+      "transition": "right_to_right"
+    },
+    {
+      "condition": "debate-3-answer",
+      "count": 1,
+      "transition": "right_to_wrong"
+    },
+    {
+      "condition": "debate-3-answer",
+      "count": 4,
+      "transition": "wrong_to_right"
+    },
+    {
+      "condition": "debate-3-answer",
+      "count": 84,
+      "transition": "wrong_to_wrong"
+    }
+  ],
+  "schema_version": "1"
+}

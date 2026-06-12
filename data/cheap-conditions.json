@@ -1,0 +1,22 @@
+{
+  "conditions": [
+    {
+      "id": "solo",
+      "workflow": "solo"
+    },
+    {
+      "id": "sample-3",
+      "workflow": "sample",
+      "agents": 3,
+      "aggregation": "plurality_vote"
+    },
+    {
+      "id": "debate-3-answer",
+      "workflow": "debate",
+      "agents": 3,
+      "rounds": 1,
+      "aggregation": "plurality_vote",
+      "debate_peer_view": "answer_only"
+    }
+  ]
+}

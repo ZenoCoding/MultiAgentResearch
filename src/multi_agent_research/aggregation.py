@@ -89,7 +89,18 @@ def aggregate_votes(
     )
     included = [ballot for ballot in ballots if ballot.included]
     if not included:
-        raise ValueError("Voting produced no valid ballots")
+        raise AggregationInconclusive(
+            "Voting produced no valid ballots",
+            details={
+                "aggregation": mode,
+                "reason": "no_valid_ballots",
+                "tally": {},
+                "valid_ballots": 0,
+                "total_ballots": len(ballots),
+                "tied_answers": [],
+                "ballots": [ballot.model_dump() for ballot in ballots],
+            },
+        )
 
     tally = Counter(ballot.normalized_answer for ballot in included)
     top_count = max(tally.values())

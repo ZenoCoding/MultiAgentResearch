@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "experiment_id": "hle-matrix-canary-2-v1",
+  "tasks": "benchmarks/hle-matrix-canary-2/tasks.jsonl",
+  "aggregation_judge_model": "gpt-5.4-mini-2026-03-17",
+  "repetitions": 1,
+  "defaults": {
+    "aggregation": "plurality_vote",
+    "vote_tie_break": "judge",
+    "debate_peer_view": "full_response",
+    "include_confidence": false,
+    "judge_reasoning_effort": "low"
+  },
+  "families": {
+    "solo": {
+      "efforts": ["none", "low", "medium", "high", "xhigh"]
+    },
+    "self_critic": [
+      {"effort": "none", "rounds": [1, 5, 9]},
+      {"effort": "medium", "rounds": [1, 3, 5]}
+    ],
+    "sampling": [
+      {"effort": "none", "agents": [1, 6, 9]},
+      {"effort": "medium", "agents": [1, 6, 9]}
+    ],
+    "debate": [
+      {
+        "effort": "none",
+        "agent_round_pairs": [[3, 1], [6, 1], [9, 1], [3, 3], [6, 3]]
+      },
+      {
+        "effort": "medium",
+        "agent_round_pairs": [[3, 1], [6, 1], [9, 1], [3, 3], [9, 3]]
+      }
+    ],
+    "supervisor_worker": [
+      {
+        "worker_effort": "none",
+        "supervisor_effort": "none",
+        "max_rounds": [2, 5]
+      },
+      {
+        "worker_effort": "medium",
+        "supervisor_effort": "medium",
+        "max_rounds": [2, 5]
+      },
+      {
+        "worker_effort": "high",
+        "supervisor_effort": "high",
+        "max_rounds": [2, 5]
+      },
+      {
+        "worker_effort": "low",
+        "supervisor_effort": "high",
+        "max_rounds": [5]
+      },
+      {
+        "worker_effort": "high",
+        "supervisor_effort": "low",
+        "max_rounds": [5]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "cais/hle",
+    "purpose": "Two-task full-matrix canary before the 40-task pilot",
+    "task_mix": "One compact canonical MCQ and one compact canonical short-answer task",
+    "scoring": "Versioned official-contract semantic HLE grading for every canonical final response",
+    "grader_model": "gpt-5.4-mini-2026-03-17",
+    "grader_reasoning_effort": "low",
+    "aggregation_judge_model": "gpt-5.4-mini-2026-03-17",
+    "aggregation_judge_reasoning_effort": "low"
+  }
+}

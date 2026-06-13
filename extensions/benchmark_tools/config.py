@@ -16,6 +16,7 @@ EFFORTS = {"none", "low", "medium", "high", "xhigh"}
 class ExperimentConfig:
     experiment_id: str
     tasks_path: str
+    aggregation_judge_model: str | None
     repetitions: int
     conditions: tuple[Condition, ...]
     metadata: dict[str, Any]
@@ -30,6 +31,7 @@ def load_experiment_config(path: Path | str) -> ExperimentConfig:
         "schema_version",
         "experiment_id",
         "tasks",
+        "aggregation_judge_model",
         "repetitions",
         "defaults",
         "families",
@@ -43,6 +45,14 @@ def load_experiment_config(path: Path | str) -> ExperimentConfig:
 
     experiment_id = _nonempty_string(data.get("experiment_id"), "experiment_id")
     tasks_path = _nonempty_string(data.get("tasks"), "tasks")
+    aggregation_judge_model = (
+        _nonempty_string(
+            data.get("aggregation_judge_model"),
+            "aggregation_judge_model",
+        )
+        if data.get("aggregation_judge_model") is not None
+        else None
+    )
     repetitions = int(data.get("repetitions", 1))
     if repetitions < 1:
         raise ValueError("repetitions must be positive")
@@ -69,6 +79,7 @@ def load_experiment_config(path: Path | str) -> ExperimentConfig:
     return ExperimentConfig(
         experiment_id=experiment_id,
         tasks_path=tasks_path,
+        aggregation_judge_model=aggregation_judge_model,
         repetitions=repetitions,
         conditions=tuple(conditions),
         metadata=metadata,
@@ -192,6 +203,11 @@ def _condition(
         "vote_tie_break": defaults.get("vote_tie_break", "judge"),
         "debate_peer_view": defaults.get("debate_peer_view", "full_response"),
         "include_confidence": bool(defaults.get("include_confidence", False)),
+        "judge_reasoning_effort": (
+            _effort(defaults["judge_reasoning_effort"])
+            if defaults.get("judge_reasoning_effort") is not None
+            else None
+        ),
         **overrides,
     }
     return Condition(**values)

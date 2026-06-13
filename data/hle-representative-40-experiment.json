@@ -2,12 +2,14 @@
   "schema_version": 1,
   "experiment_id": "hle-representative-40-scaling-v1",
   "tasks": "benchmarks/hle-representative-40/tasks.jsonl",
+  "aggregation_judge_model": "gpt-5.4-mini-2026-03-17",
   "repetitions": 1,
   "defaults": {
     "aggregation": "plurality_vote",
     "vote_tie_break": "judge",
     "debate_peer_view": "full_response",
-    "include_confidence": false
+    "include_confidence": false,
+    "judge_reasoning_effort": "low"
   },
   "families": {
     "solo": {
@@ -152,6 +154,10 @@
     "benchmark": "cais/hle",
     "purpose": "Compute scaling across workflow architecture and reasoning effort",
     "task_mix": "Subject-proportional, with canonical MCQ and short-answer representation",
-    "scoring": "Versioned official-contract semantic HLE grading for canonical final and stage responses"
+    "scoring": "Versioned official-contract semantic HLE grading for every canonical final response; stage grading is an optional diagnostic pass",
+    "grader_model": "gpt-5.4-mini-2026-03-17",
+    "grader_reasoning_effort": "low",
+    "aggregation_judge_model": "gpt-5.4-mini-2026-03-17",
+    "aggregation_judge_reasoning_effort": "low"
   }
 }

@@ -24,26 +24,29 @@ from multi_agent_research.models import AgentSpec, Message, PromptTemplate
 
 
 GRADING_SCHEMA_VERSION = 1
+DEFAULT_GRADER_MODEL = "gpt-5.4-mini-2026-03-17"
+DEFAULT_GRADER_REASONING_EFFORT = "low"
 HLE_GRADER_PROMPT = PromptTemplate(
     name="benchmark.hle.semantic_grader",
-    version="1.0.0",
+    version="2.0.0",
     template="""Judge whether the following [response] to [question] is correct or not based on the precise and unambiguous [correct_answer] below.
 
 [question]: $question
 
 [response]: $response
 
-Your judgment must follow these criteria:
-- extracted_final_answer: Extract the final exact answer from [response]. Use "None" if no exact final answer can be extracted.
-- reasoning: Explain only meaningful differences between [correct_answer] and the extracted answer. Do not solve the problem or propose a different answer.
-- correct: Use "yes" only when the extracted answer matches [correct_answer], including mathematically or semantically equivalent forms and a small margin of error for numerical problems. Use "no" for inconsistency, ambiguity, non-equivalence, or an incorrect answer.
-- confidence: Extract a 0-100 confidence score from [response], or use 100 if none is present.
-- strict: Always true.
+Your judgement must be in the format and criteria specified below:
+
+extracted_final_answer: The final exact answer extracted from the [response]. Put the extracted answer as 'None' if there is no exact, final answer to extract from the response.
 
 [correct_answer]: $correct_answer
 
-Return only one JSON object with exactly these fields:
-{"extracted_final_answer":"...", "reasoning":"...", "correct":"yes", "confidence":100, "strict":true}""",
+reasoning: Explain why the extracted_final_answer is correct or incorrect based on [correct_answer], focusing only on if there are meaningful differences between [correct_answer] and the extracted_final_answer. Do not comment on any background to the problem, do not attempt to solve the problem, do not argue for any answer different than [correct_answer], focus only on whether the answers match.
+
+correct: Answer 'yes' if extracted_final_answer matches the [correct_answer] given above, or is within a small margin of error for numerical problems. Answer 'no' otherwise, i.e. if there if there is any inconsistency, ambiguity, non-equivalency, or if the extracted answer is incorrect.
+
+
+confidence: The extracted confidence score between 0|\\%| and 100|\\%| from [response]. Put 100 if there is no confidence score available.""",
 )
 
 
@@ -66,7 +69,7 @@ class GradeSetManifest:
     prompt_name: str
     prompt_version: str
     prompt_sha256: str
-    max_tokens: int
+    max_tokens: int | None
     reasoning_effort: str | None
     grade_set_id: str
     schema_version: int = GRADING_SCHEMA_VERSION
@@ -140,8 +143,8 @@ async def grade_experiment(
     tasks_path: Path | str,
     results_dir: Path | str,
     experiment_id: str,
-    grader_model: str,
-    scope: Literal["final", "all"] = "all",
+    grader_model: str = DEFAULT_GRADER_MODEL,
+    scope: Literal["final", "all"] = "final",
     grade_set_id: str | None = None,
     concurrency: int = 8,
     max_in_flight_requests: int = 8,
@@ -152,8 +155,8 @@ async def grade_experiment(
     retry_base_delay_seconds: float = 1.0,
     retry_max_delay_seconds: float = 30.0,
     retry_jitter_ratio: float = 0.2,
-    max_tokens: int = 4096,
-    reasoning_effort: str | None = None,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = DEFAULT_GRADER_REASONING_EFFORT,
     dry_run: bool = False,
     llm: LLMClient | None = None,
     sleep=asyncio.sleep,  # type: ignore[no-untyped-def]
@@ -211,6 +214,7 @@ async def grade_experiment(
             for record in records.values()
         ),
         "grader_model": grader_model,
+        "reasoning_effort": reasoning_effort,
     }
     if dry_run:
         return {"dry_run": True, **plan}
@@ -239,14 +243,23 @@ async def grade_experiment(
         ),
         estimated_tokens=estimated_tokens_per_request,
     )
+    parameters: dict[str, Any] = {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "ExtractedAnswer",
+                "strict": True,
+                "schema": HLEGrade.model_json_schema(),
+            },
+        },
+    }
+    if max_tokens is not None:
+        parameters["max_completion_tokens"] = max_tokens
     agent = AgentSpec(
         id="hle-grader",
         model=grader_model,
         reasoning_effort=reasoning_effort,
-        parameters={
-            "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
-        },
+        parameters=parameters,
     )
     retry_policy = RetryPolicy(
         max_attempts=max_attempts,
@@ -535,7 +548,7 @@ def _grade_manifest(
     task_set_sha256: str,
     grader_model: str,
     scope: str,
-    max_tokens: int,
+    max_tokens: int | None,
     reasoning_effort: str | None,
     grade_set_id: str | None,
 ) -> GradeSetManifest:

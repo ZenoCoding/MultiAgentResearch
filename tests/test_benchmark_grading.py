@@ -6,6 +6,10 @@ import pytest
 
 from extensions.benchmark_tools.analysis import analyze_experiment
 from extensions.benchmark_tools.grading import grade_experiment, load_grade_set
+from extensions.benchmark_tools.grading import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_GRADER_REASONING_EFFORT,
+)
 from extensions.benchmark_tools.runner import run_benchmark
 from extensions.benchmark_tools.schema import Condition
 from tests.fakes import FakeLLMClient
@@ -77,6 +81,7 @@ async def test_semantic_hle_grading_is_resumable_and_drives_analysis(
         results_dir=results,
         experiment_id="semantic",
         grader_model="fake/grader",
+        scope="all",
         llm=FakeLLMClient([_judge_json()]),
         max_attempts=1,
     )
@@ -85,6 +90,7 @@ async def test_semantic_hle_grading_is_resumable_and_drives_analysis(
         results_dir=results,
         experiment_id="semantic",
         grader_model="fake/grader",
+        scope="all",
         llm=FakeLLMClient([]),
         max_attempts=1,
     )
@@ -164,3 +170,53 @@ async def test_invalid_grader_json_retries_as_a_new_attempt(tmp_path) -> None:
         "failed",
         "success",
     ]
+
+
+@pytest.mark.asyncio
+async def test_default_grader_is_pinned_low_effort_with_strict_schema(
+    tmp_path,
+) -> None:
+    tasks = tmp_path / "tasks.jsonl"
+    results = tmp_path / "results"
+    _write_short_answer_task(tasks)
+    await run_benchmark(
+        tasks_path=tasks,
+        model="fake/model",
+        experiment_id="default-grader",
+        output_dir=results,
+        conditions=[Condition(id="solo", workflow="solo")],
+        llm=FakeLLMClient(["<final_answer>0.5</final_answer>"]),
+        max_attempts=1,
+    )
+    grader = FakeLLMClient([_judge_json()])
+
+    summary = await grade_experiment(
+        tasks_path=tasks,
+        results_dir=results,
+        experiment_id="default-grader",
+        llm=grader,
+        max_attempts=1,
+    )
+
+    grade_set = load_grade_set(
+        results_dir=results,
+        experiment_id="default-grader",
+        grade_set_id=summary["grade_set_id"],
+    )
+    assert grade_set is not None
+    assert grade_set.manifest.grader_model == DEFAULT_GRADER_MODEL
+    assert (
+        grade_set.manifest.reasoning_effort
+        == DEFAULT_GRADER_REASONING_EFFORT
+    )
+    record = next(iter(grade_set.records.values()))
+    call = record.attempts[0]["call"]
+    assert call["requested_model"] == DEFAULT_GRADER_MODEL
+    assert call["request_parameters"]["reasoning_effort"] == "low"
+    assert "max_completion_tokens" not in call["request_parameters"]
+    response_format = call["request_parameters"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    prompt = grader.requests[0][0].content
+    assert isinstance(prompt, str)
+    assert "Your judgement must be in the format and criteria specified below" in prompt

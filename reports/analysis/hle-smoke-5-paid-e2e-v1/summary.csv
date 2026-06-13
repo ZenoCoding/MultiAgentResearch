@@ -1,0 +1,6 @@
+condition,workflow,expected_jobs,completed_answer_jobs,graded_jobs,grading_failures,inconclusive_jobs,provider_execution_failures,contract_invalid_outputs,missing_jobs,attempts,retried_jobs,coverage_rate,planned_job_accuracy,valid_completed_accuracy,graded_accuracy,correct_valid_completed,total_tokens,input_tokens,output_tokens,reasoning_tokens,cost_usd,correct_per_dollar,correct_per_million_tokens,avg_wall_time_ms
+debate-e-low-a2-r1,debate,5,5,5,0,0,0,0,0,5,0,1.0,0.2,0.2,0.2,1,24597,12115,12482,6681,0.0212682,47.018553521219474,40.65536447534252,14643.051800201647
+sample-e-low-a3,independent_sample,5,5,5,0,0,0,0,0,5,0,1.0,0.2,0.2,0.2,1,23427,7079,16348,10927,0.02610075,38.313075294771224,42.68578990054211,16521.719466580544
+self-critic-e-low-r1,self_critic,5,5,5,0,0,0,0,0,5,0,1.0,0.2,0.2,0.2,1,14470,3097,11373,8390,0.014835650000000002,67.40520300762014,69.1085003455425,16438.003783207387
+solo-e-low,solo,5,5,5,0,0,0,0,0,5,0,1.0,0.2,0.2,0.2,1,5358,495,4863,2975,0.006177750000000001,161.87123143539313,186.6368047779022,6850.061666616239
+supervisor-w-low-s-low-r1,supervisor,5,5,5,0,0,0,0,0,5,0,1.0,0.4,0.4,0.4,2,14864,5731,9133,4991,0.012562450000000001,159.20461374970645,134.55328310010765,13980.969600006938

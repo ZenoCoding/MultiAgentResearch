@@ -120,7 +120,10 @@ class AnswerSpec(HarnessModel):
             instructions.append(self.custom_instruction.strip())
         if self.type == "multiple_choice":
             labels = ", ".join(choice.label for choice in self.choices)
-            instructions.append(f"The final answer must be one of: {labels}.")
+            instructions.append(
+                f"The final answer must be exactly one label from: {labels}. "
+                "Do not select multiple options, list ranges, or include any extra text inside the final_answer tags."
+            )
         elif self.type == "number":
             instructions.append("The final answer must be a number.")
         elif self.type == "json":

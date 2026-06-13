@@ -9,7 +9,18 @@ from extensions.benchmark_tools.analysis import analyze_experiment
 from extensions.benchmark_tools.charts import write_charts
 from extensions.benchmark_tools.config import load_experiment_config
 from extensions.benchmark_tools.connector import load_jsonl, write_fixed_sample
-from extensions.benchmark_tools.grading import grade_experiment
+from extensions.benchmark_tools.grading import (
+    DEFAULT_GRADER_MODEL,
+    DEFAULT_GRADER_REASONING_EFFORT,
+    grade_experiment,
+)
+from extensions.benchmark_tools.preflight import preflight_experiment
+from extensions.benchmark_tools.pipeline import (
+    PreflightFailedError,
+    run_experiment_pipeline,
+)
+from extensions.benchmark_tools.progress import TerminalProgress
+from extensions.benchmark_tools.results import render_results
 from extensions.benchmark_tools.runner import load_conditions, run_benchmark
 from extensions.benchmark_tools.site import build_site
 
@@ -66,35 +77,130 @@ def main() -> None:
             if config
             else load_conditions(args.conditions)
         )
+        judge_model = args.judge_model or (
+            config.aggregation_judge_model if config else None
+        )
         repetitions = args.repetitions or (
             config.repetitions if config else 1
         )
+        progress = TerminalProgress() if args.progress and not args.dry_run else None
+        try:
+            summary = asyncio.run(
+                run_benchmark(
+                    tasks_path=tasks,
+                    model=args.model,
+                    judge_model=judge_model,
+                    experiment_id=experiment_id,
+                    output_dir=args.results_dir,
+                    conditions=conditions,
+                    system_prompt=args.system_prompt,
+                    concurrency=args.concurrency,
+                    max_in_flight_requests=args.max_in_flight_requests,
+                    requests_per_minute=args.requests_per_minute,
+                    tokens_per_minute=args.tokens_per_minute,
+                    estimated_tokens_per_request=args.estimated_tokens_per_request,
+                    repetitions=repetitions,
+                    max_attempts=args.max_attempts,
+                    retry_base_delay_seconds=args.retry_base_delay,
+                    retry_max_delay_seconds=args.retry_max_delay,
+                    retry_jitter_ratio=args.retry_jitter,
+                    resume=args.resume,
+                    dry_run=args.dry_run,
+                    required_answer_type=args.require_answer_type,
+                    experiment_metadata=config.metadata if config else None,
+                    event_handler=progress.handle if progress else None,
+                    emit_json_events=progress is None,
+                )
+            )
+        finally:
+            if progress:
+                progress.close()
+        if progress is None:
+            print(json.dumps(summary, indent=2))
+    elif args.command == "experiment":
+        progress = TerminalProgress()
+
+        def stage(name: str, data: dict[str, object]) -> None:
+            if name == "preflight_started":
+                print("Preflight: running...", flush=True)
+            elif name == "preflight_skipped":
+                print(f"Preflight: skipped ({data['reason']})", flush=True)
+            elif name == "preflight_finished":
+                print(
+                    f"Preflight: {data['status']} "
+                    f"({data.get('call_count', 0)} calls)",
+                    flush=True,
+                )
+            elif name == "grading_started":
+                print("Grading: running...", flush=True)
+            elif name == "grading_finished":
+                print(
+                    f"Grading: {data.get('cached_grades', 0)} cached, "
+                    f"{data.get('scheduled_grades', 0)} newly scheduled",
+                    flush=True,
+                )
+
+        try:
+            try:
+                pipeline = asyncio.run(
+                    run_experiment_pipeline(
+                        config_path=args.config,
+                        model=args.model,
+                        results_dir=args.results_dir,
+                        reports_dir=args.reports_dir,
+                        grader_model=args.grader_model,
+                        grader_reasoning_effort=args.grader_reasoning_effort,
+                        concurrency=args.concurrency,
+                        max_in_flight_requests=args.max_in_flight_requests,
+                        grading_concurrency=args.grading_concurrency,
+                        grading_max_in_flight_requests=(
+                            args.grading_max_in_flight_requests
+                        ),
+                        requests_per_minute=args.requests_per_minute,
+                        tokens_per_minute=args.tokens_per_minute,
+                        max_attempts=args.max_attempts,
+                        skip_preflight=args.skip_preflight,
+                        skip_grading=args.skip_grading,
+                        html=args.html,
+                        event_handler=progress.handle,
+                        stage_handler=stage,
+                    )
+                )
+            except PreflightFailedError as exc:
+                print("\nFailed preflight checks:", flush=True)
+                for check in exc.summary["checks"]:
+                    if check["status"] == "failed":
+                        print(
+                            f"- {check['check_id']}: {check['error']}",
+                            flush=True,
+                        )
+                raise SystemExit(1) from None
+        finally:
+            progress.close()
+        print(render_results(pipeline["summary"]))
+        if pipeline["site_path"]:
+            print(f"\nHTML: {pipeline['site_path']}")
+    elif args.command == "preflight":
         summary = asyncio.run(
-            run_benchmark(
-                tasks_path=tasks,
-                model=args.model,
-                judge_model=args.judge_model,
-                experiment_id=experiment_id,
-                output_dir=args.results_dir,
-                conditions=conditions,
-                system_prompt=args.system_prompt,
-                concurrency=args.concurrency,
-                max_in_flight_requests=args.max_in_flight_requests,
-                requests_per_minute=args.requests_per_minute,
-                tokens_per_minute=args.tokens_per_minute,
-                estimated_tokens_per_request=args.estimated_tokens_per_request,
-                repetitions=repetitions,
+            preflight_experiment(
+                config_path=args.config,
+                primary_model=args.model,
+                grader_model=args.grader_model,
+                grader_reasoning_effort=args.grader_reasoning_effort,
+                dry_run=args.dry_run,
                 max_attempts=args.max_attempts,
                 retry_base_delay_seconds=args.retry_base_delay,
                 retry_max_delay_seconds=args.retry_max_delay,
                 retry_jitter_ratio=args.retry_jitter,
-                resume=args.resume,
-                dry_run=args.dry_run,
-                required_answer_type=args.require_answer_type,
-                experiment_metadata=config.metadata if config else None,
+                max_in_flight_requests=args.max_in_flight_requests,
+                requests_per_minute=args.requests_per_minute,
+                tokens_per_minute=args.tokens_per_minute,
+                estimated_tokens_per_request=args.estimated_tokens_per_request,
             )
         )
         print(json.dumps(summary, indent=2))
+        if summary["status"] == "failed":
+            raise SystemExit(1)
     elif args.command == "analyze":
         summary = analyze_experiment(
             tasks_path=args.tasks,
@@ -105,6 +211,24 @@ def main() -> None:
             require_semantic_grades=args.require_semantic_grades,
         )
         print(json.dumps({"conditions": len(summary["conditions"])}, indent=2))
+    elif args.command == "results":
+        config = load_experiment_config(args.config) if args.config else None
+        tasks = args.tasks or (config.tasks_path if config else None)
+        experiment_id = args.experiment_id or (
+            config.experiment_id if config else None
+        )
+        if not tasks or not experiment_id:
+            raise ValueError(
+                "results requires --tasks and --experiment-id, or a --config"
+            )
+        summary = analyze_experiment(
+            tasks_path=tasks,
+            results_dir=args.results_dir,
+            experiment_id=experiment_id,
+            output_dir=None,
+            grade_set_id=args.grade_set_id,
+        )
+        print(render_results(summary))
     elif args.command == "grade":
         summary = asyncio.run(
             grade_experiment(
@@ -135,6 +259,13 @@ def main() -> None:
     elif args.command == "site":
         index = build_site(analysis_dir=args.analysis_dir, output_dir=args.output_dir)
         print(index)
+    elif args.command == "dashboard":
+        from extensions.benchmark_tools.dashboard import serve
+        serve(
+            results_dir=args.results_dir,
+            port=args.port,
+            open_browser=args.open,
+        )
     elif args.command == "update-report":
         analysis_dir = Path(args.output_dir) / "analysis" / args.experiment_id
         site_dir = Path(args.output_dir) / "site" / args.experiment_id
@@ -146,7 +277,7 @@ def main() -> None:
                     results_dir=args.results_dir,
                     experiment_id=args.experiment_id,
                     grader_model=args.grader_model,
-                    scope="all",
+                    scope=args.grading_scope,
                     grade_set_id=grade_set_id,
                     concurrency=args.grading_concurrency,
                     max_in_flight_requests=args.max_in_flight_requests,
@@ -202,7 +333,13 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--config")
     run.add_argument("--tasks")
     run.add_argument("--model", required=True)
-    run.add_argument("--judge-model")
+    run.add_argument(
+        "--judge-model",
+        help=(
+            "Aggregation and vote tie-break judge model. "
+            "Does not replace the supervisor model."
+        ),
+    )
     run.add_argument("--experiment-id")
     run.add_argument("--results-dir", default="results")
     run.add_argument("--conditions")
@@ -238,8 +375,67 @@ def _parser() -> argparse.ArgumentParser:
         help="Validate and print the job/call plan without writing or calling a model.",
     )
     run.add_argument(
+        "--progress",
+        action="store_true",
+        help="Show a live terminal summary instead of per-job JSON output.",
+    )
+    run.add_argument(
         "--require-answer-type",
         help="Reject the run unless every task has this canonical answer type.",
+    )
+
+    experiment = sub.add_parser(
+        "experiment",
+        help="Preflight, run, grade, and summarize an experiment end to end.",
+    )
+    experiment.add_argument("--config", required=True)
+    experiment.add_argument("--model", required=True)
+    experiment.add_argument("--results-dir", default="results")
+    experiment.add_argument("--reports-dir", default="reports")
+    experiment.add_argument("--grader-model", default=DEFAULT_GRADER_MODEL)
+    experiment.add_argument(
+        "--grader-reasoning-effort",
+        default=DEFAULT_GRADER_REASONING_EFFORT,
+    )
+    experiment.add_argument("--concurrency", type=int, default=1)
+    experiment.add_argument("--max-in-flight-requests", type=int, default=1)
+    experiment.add_argument("--grading-concurrency", type=int, default=8)
+    experiment.add_argument(
+        "--grading-max-in-flight-requests",
+        type=int,
+        default=8,
+    )
+    experiment.add_argument("--requests-per-minute", type=int)
+    experiment.add_argument("--tokens-per-minute", type=int)
+    experiment.add_argument("--max-attempts", type=int, default=3)
+    experiment.add_argument("--skip-preflight", action="store_true")
+    experiment.add_argument("--skip-grading", action="store_true")
+    experiment.add_argument(
+        "--html",
+        action="store_true",
+        help="Also generate the optional static HTML report.",
+    )
+
+    preflight = sub.add_parser(
+        "preflight",
+        help="Test live provider compatibility before a paid benchmark run.",
+    )
+    preflight.add_argument("--config", required=True)
+    preflight.add_argument("--model", required=True)
+    preflight.add_argument("--grader-model")
+    preflight.add_argument("--grader-reasoning-effort")
+    preflight.add_argument("--max-in-flight-requests", type=int, default=1)
+    preflight.add_argument("--requests-per-minute", type=int)
+    preflight.add_argument("--tokens-per-minute", type=int)
+    preflight.add_argument("--estimated-tokens-per-request", type=int, default=512)
+    preflight.add_argument("--max-attempts", type=int, default=2)
+    preflight.add_argument("--retry-base-delay", type=float, default=1.0)
+    preflight.add_argument("--retry-max-delay", type=float, default=10.0)
+    preflight.add_argument("--retry-jitter", type=float, default=0.0)
+    preflight.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print exact planned checks with zero provider calls or writes.",
     )
 
     analyze = sub.add_parser("analyze", help="Score saved run artifacts.")
@@ -254,6 +450,16 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
     )
 
+    results = sub.add_parser(
+        "results",
+        help="Show a scored experiment summary directly in the terminal.",
+    )
+    results.add_argument("--config")
+    results.add_argument("--tasks")
+    results.add_argument("--experiment-id")
+    results.add_argument("--results-dir", default="results")
+    results.add_argument("--grade-set-id")
+
     grade = sub.add_parser(
         "grade",
         help="Semantically grade canonical HLE final and stage responses.",
@@ -261,8 +467,12 @@ def _parser() -> argparse.ArgumentParser:
     grade.add_argument("--tasks", required=True)
     grade.add_argument("--results-dir", default="results")
     grade.add_argument("--experiment-id", required=True)
-    grade.add_argument("--grader-model", required=True)
-    grade.add_argument("--scope", choices=["final", "all"], default="all")
+    grade.add_argument(
+        "--grader-model",
+        default=DEFAULT_GRADER_MODEL,
+        help=f"Semantic grader model (default: {DEFAULT_GRADER_MODEL}).",
+    )
+    grade.add_argument("--scope", choices=["final", "all"], default="final")
     grade.add_argument("--grade-set-id")
     grade.add_argument("--concurrency", type=int, default=8)
     grade.add_argument("--max-in-flight-requests", type=int, default=8)
@@ -273,8 +483,19 @@ def _parser() -> argparse.ArgumentParser:
     grade.add_argument("--retry-base-delay", type=float, default=1.0)
     grade.add_argument("--retry-max-delay", type=float, default=30.0)
     grade.add_argument("--retry-jitter", type=float, default=0.2)
-    grade.add_argument("--max-tokens", type=int, default=4096)
-    grade.add_argument("--reasoning-effort")
+    grade.add_argument(
+        "--max-tokens",
+        type=int,
+        help="Optional explicit grader completion cap; omitted by default.",
+    )
+    grade.add_argument(
+        "--reasoning-effort",
+        default=DEFAULT_GRADER_REASONING_EFFORT,
+        help=(
+            "Explicit grader reasoning effort "
+            f"(default: {DEFAULT_GRADER_REASONING_EFFORT})."
+        ),
+    )
     grade.add_argument("--dry-run", action="store_true")
 
     charts = sub.add_parser("charts", help="Generate SVG charts from analysis JSON.")
@@ -290,20 +511,48 @@ def _parser() -> argparse.ArgumentParser:
     update.add_argument("--results-dir", default="results")
     update.add_argument("--experiment-id", required=True)
     update.add_argument("--output-dir", default="reports")
-    update.add_argument("--grader-model")
+    update.add_argument(
+        "--grader-model",
+        help=(
+            "Run semantic grading before rebuilding the report. "
+            f"Recommended: {DEFAULT_GRADER_MODEL}."
+        ),
+    )
     update.add_argument("--grade-set-id")
     update.add_argument("--grading-concurrency", type=int, default=8)
+    update.add_argument(
+        "--grading-scope",
+        choices=["final", "all"],
+        default="final",
+    )
     update.add_argument("--max-in-flight-requests", type=int, default=8)
     update.add_argument("--requests-per-minute", type=int)
     update.add_argument("--tokens-per-minute", type=int)
     update.add_argument("--max-attempts", type=int, default=3)
-    update.add_argument("--grader-max-tokens", type=int, default=4096)
-    update.add_argument("--grader-reasoning-effort")
+    update.add_argument(
+        "--grader-max-tokens",
+        type=int,
+        help="Optional explicit grader completion cap; omitted by default.",
+    )
+    update.add_argument(
+        "--grader-reasoning-effort",
+        default=DEFAULT_GRADER_REASONING_EFFORT,
+    )
     update.add_argument(
         "--require-semantic-grades",
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    dashboard = sub.add_parser("dashboard", help="Start the local results dashboard.")
+    dashboard.add_argument(
+        "--open",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Automatically open the dashboard in a web browser.",
+    )
+    dashboard.add_argument("--port", type=int, default=8000, help="Port to run the dashboard on.")
+    dashboard.add_argument("--results-dir", default="results", help="Directory where experiment results are saved.")
+
     return parser
 
 

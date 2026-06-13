@@ -6,7 +6,7 @@ import pytest
 
 from extensions.benchmark_tools.analysis import analyze_experiment
 from extensions.benchmark_tools.experiment import load_ledger, load_manifest
-from extensions.benchmark_tools.runner import run_benchmark
+from extensions.benchmark_tools.runner import _workflow, run_benchmark
 from extensions.benchmark_tools.schema import Condition
 from extensions.benchmark_tools.site import build_site
 from multi_agent_research.llm import LLMCallError
@@ -78,6 +78,38 @@ async def test_run_persists_manifest_ledger_and_resumes(tmp_path) -> None:
     assert record.attempt_count == 1
     assert record.latest_run_id
     assert (experiment_root / record.latest_run_id / "artifact-manifest.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_emits_structured_progress_events(tmp_path) -> None:
+    tasks = tmp_path / "tasks.jsonl"
+    _write_tasks(tasks)
+    events = []
+
+    await run_benchmark(
+        tasks_path=tasks,
+        model="fake/model",
+        experiment_id="events",
+        output_dir=tmp_path / "results",
+        conditions=[Condition(id="solo", workflow="solo")],
+        llm=FakeLLMClient(["<final_answer>A</final_answer>"]),
+        max_attempts=1,
+        event_handler=events.append,
+        emit_json_events=False,
+    )
+
+    assert [event["event"] for event in events] == [
+        "benchmark_started",
+        "attempt_started",
+        "model_call_completed",
+        "attempt_completed",
+        "benchmark_finished",
+    ]
+    assert events[0]["total_jobs"] == 1
+    assert events[2]["output_tokens"] == 5
+    assert events[3]["status"] == "success"
+    assert events[3]["cost_usd"] == 0.01
+    assert events[3]["output_tokens"] == 5
 
 
 class Flaky429Client:
@@ -259,3 +291,39 @@ async def test_required_answer_type_fails_before_writing(tmp_path) -> None:
         )
 
     assert not results.exists()
+
+
+def test_aggregation_judge_model_does_not_replace_supervisor_model() -> None:
+    sample = _workflow(
+        condition=Condition(
+            id="sample",
+            workflow="sample",
+            agents=3,
+            aggregation="plurality_vote",
+            vote_tie_break="judge",
+            judge_reasoning_effort="low",
+        ),
+        model="primary/model",
+        judge_model="aggregation/judge",
+        system_prompt="",
+        requires_semantic_judge=True,
+    )
+    supervisor = _workflow(
+        condition=Condition(
+            id="supervisor",
+            workflow="supervisor",
+            rounds=2,
+            reasoning_effort="medium",
+            supervisor_reasoning_effort="high",
+            judge_reasoning_effort="low",
+        ),
+        model="primary/model",
+        judge_model="aggregation/judge",
+        system_prompt="",
+        requires_semantic_judge=True,
+    )
+
+    assert sample.wrapped.judge.model == "aggregation/judge"
+    assert sample.wrapped.judge.reasoning_effort == "low"
+    assert supervisor.wrapped.supervisor.model == "primary/model"
+    assert supervisor.wrapped.supervisor.reasoning_effort == "high"

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="460" viewBox="0 0 920 460" role="img" aria-label="Cost vs planned-job accuracy">
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #111827; }
+.title { font-size: 22px; font-weight: 700; }
+.tick { font-size: 11px; }
+.value { font-size: 12px; font-weight: 650; }
+.axis-label { font-size: 13px; font-weight: 650; }
+</style>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="24" y="34" class="title">Cost vs planned-job accuracy</text>
+<line x1="80" y1="380" x2="840" y2="380" stroke="#111827"/><line x1="80" y1="80" x2="80" y2="380" stroke="#111827"/><circle cx="96.2" cy="320.0" r="7" fill="#2563eb"><title>debate-e-low-a2-r1</title></circle><text x="106.2" y="312.0" class="tick">debate-e-low-a2-r1</text><circle cx="99.8" cy="320.0" r="7" fill="#16a34a"><title>sample-e-low-a3</title></circle><text x="109.8" y="312.0" class="tick">sample-e-low-a3</text><circle cx="91.3" cy="320.0" r="7" fill="#dc2626"><title>self-critic-e-low-r1</title></circle><text x="101.3" y="312.0" class="tick">self-critic-e-low-r1</text><circle cx="84.7" cy="320.0" r="7" fill="#9333ea"><title>solo-e-low</title></circle><text x="94.7" y="312.0" class="tick">solo-e-low</text><circle cx="89.5" cy="260.0" r="7" fill="#ea580c"><title>supervisor-w-low-s-low-r1</title></circle><text x="99.5" y="252.0" class="tick">supervisor-w-low-s-low-r1</text><text x="460.0" y="442" text-anchor="middle" class="axis-label">Cost USD</text><text x="20" y="230.0" transform="rotate(-90 20 230.0)" text-anchor="middle" class="axis-label">Planned-job accuracy</text>
+</svg>

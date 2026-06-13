@@ -209,14 +209,30 @@ async def _judge_semantic_vote(
     )
     included = [ballot for ballot in ballots if ballot.included]
     if not included:
-        raise ValueError("Voting produced no valid ballots")
+        raise AggregationInconclusive(
+            "Voting produced no valid ballots",
+            details={
+                "aggregation": mode,
+                "reason": "no_valid_ballots",
+                "valid_ballots": 0,
+                "total_ballots": len(ballots),
+                "ballots": [ballot.model_dump() for ballot in ballots],
+            },
+        )
     if len(included) == 1:
         response = included[0].raw_response
         output = WorkflowOutput.from_response(response, task.answer_spec)
         if not output.contract_valid:
-            raise ValueError(
+            raise AggregationInconclusive(
                 "Single valid ballot has an invalid answer contract: "
-                + ", ".join(output.validation_errors)
+                + ", ".join(output.validation_errors),
+                details={
+                    "aggregation": mode,
+                    "reason": "invalid_single_ballot",
+                    "valid_ballots": 1,
+                    "total_ballots": len(ballots),
+                    "ballots": [ballot.model_dump() for ballot in ballots],
+                },
             )
         context.record_stage_answer(
             step="aggregation",
@@ -274,7 +290,17 @@ async def _judge_semantic_vote(
         flags=re.IGNORECASE,
     )
     if not status_matches:
-        raise ValueError("Semantic vote judge omitted vote_status")
+        raise AggregationInconclusive(
+            "Semantic vote judge omitted vote_status",
+            details={
+                "aggregation": mode,
+                "reason": "judge_format_error",
+                "valid_ballots": len(included),
+                "total_ballots": len(ballots),
+                "ballots": [ballot.model_dump() for ballot in ballots],
+                "judge_response": response,
+            },
+        )
     if status_matches[-1].casefold() == "inconclusive":
         reason = "no_strict_majority" if mode == "majority_vote" else "tie"
         raise AggregationInconclusive(
@@ -294,9 +320,17 @@ async def _judge_semantic_vote(
         )
     output = WorkflowOutput.from_response(response, task.answer_spec)
     if not output.contract_valid:
-        raise ValueError(
+        raise AggregationInconclusive(
             "Semantic vote judge returned an invalid winner: "
-            + ", ".join(output.validation_errors)
+            + ", ".join(output.validation_errors),
+            details={
+                "aggregation": mode,
+                "reason": "judge_invalid_winner",
+                "valid_ballots": len(included),
+                "total_ballots": len(ballots),
+                "ballots": [ballot.model_dump() for ballot in ballots],
+                "judge_response": response,
+            },
         )
     context.record_stage_answer(
         step="aggregation",
@@ -371,9 +405,19 @@ async def _judge_vote_tie(
     output = WorkflowOutput.from_response(response, task.answer_spec)
     winner_normalized = normalize_answer(output.answer, task.answer_spec)
     if winner_normalized not in tied_answers:
-        raise ValueError(
+        raise AggregationInconclusive(
             "Tie-break judge selected an answer outside the tied set: "
-            f"{output.answer}"
+            f"{output.answer}",
+            details={
+                "aggregation": details["aggregation"],
+                "reason": "judge_invalid_tie_winner",
+                "tally": details["tally"],
+                "valid_ballots": details["valid_ballots"],
+                "total_ballots": details["total_ballots"],
+                "tied_answers": tied_answers,
+                "ballots": details["ballots"],
+                "judge_response": response,
+            },
         )
     context.emit(
         "votes_aggregated",

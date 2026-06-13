@@ -28,9 +28,9 @@ sampled proportionally by subject and then by canonical answer type within each
 subject. This preserves both multiple-choice and short-answer representation.
 Report the two answer types separately: multiple choice provides objective
 voting, while short answer requires semantic grouping during aggregation.
-Final and stage correctness for both answer types use the versioned HLE
-semantic grading judge so all accuracy and revision metrics share one grading
-contract.
+Final correctness for both answer types uses the versioned HLE semantic grading
+judge. Stage responses are graded only in explicit diagnostic passes for
+revision-transition analysis.
 
 Use one primary model, fixed generation parameters, and the same questions for
 every condition. Run three repetitions when provider nondeterminism or a nonzero
@@ -104,7 +104,11 @@ The HLE grader follows the official structured contract and stores the
 extracted answer, binary correctness, grading reasoning, confidence, model,
 prompt fingerprint, usage, and full call provenance. Grading is resumable and
 cached by task and full response. A mixed-HLE report must not fall back to
-normalized exact matching when semantic grades are missing.
+normalized exact matching when final semantic grades are missing. Full
+stage-level grading is optional because it substantially increases judge cost.
+The default is pinned to `gpt-5.4-mini-2026-03-17` at `low` reasoning effort;
+the official HLE script's `o3-mini-2025-01-31` call does not specify reasoning
+effort.
 
 Voting extracts each candidate's final answer and selects by strict majority
 or plurality. Canonical answers such as multiple-choice labels are normalized
@@ -112,6 +116,10 @@ and counted directly without a model call. For short answers, a semantic vote
 judge groups equivalent answers and then applies the requested voting rule.
 This judge cannot choose a semantically smaller group merely because it thinks
 that answer is more accurate.
+
+The aggregation and vote tie-break judge is pinned to
+`gpt-5.4-mini-2026-03-17` at `low` reasoning effort. This setting does not
+change the model used by supervisor-worker conditions.
 
 ## Metrics
 

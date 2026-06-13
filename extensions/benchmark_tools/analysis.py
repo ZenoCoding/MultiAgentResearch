@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import math
+import random
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
@@ -23,7 +25,7 @@ def analyze_experiment(
     tasks_path: Path | str,
     results_dir: Path | str,
     experiment_id: str,
-    output_dir: Path | str,
+    output_dir: Path | str | None,
     grade_set_id: str | None = None,
     require_semantic_grades: bool | None = None,
 ) -> dict[str, Any]:
@@ -42,14 +44,6 @@ def analyze_experiment(
         raise ValueError(
             "semantic HLE grades are required for this task set; run the "
             "benchmark-tools grade command first"
-        )
-    if (
-        semantic_required
-        and semantic_grades is not None
-        and semantic_grades.manifest.scope != "all"
-    ):
-        raise ValueError(
-            "full semantic analysis requires a grade set with scope='all'"
         )
     experiment_root = Path(results_dir) / experiment_id
     results = [
@@ -135,23 +129,24 @@ def analyze_experiment(
         semantic_grades=semantic_grades,
     )
 
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-    _write_csv(output / "runs.csv", run_rows)
-    _write_csv(output / "stage_answers.csv", stage_rows)
-    _write_csv(output / "summary.csv", summary["conditions"])
-    (output / "summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    (output / "runs.json").write_text(
-        json.dumps(run_rows, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    (output / "stage_answers.json").write_text(
-        json.dumps(stage_rows, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    if output_dir is not None:
+        output = Path(output_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        _write_csv(output / "runs.csv", run_rows)
+        _write_csv(output / "stage_answers.csv", stage_rows)
+        _write_csv(output / "summary.csv", summary["conditions"])
+        (output / "summary.json").write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (output / "runs.json").write_text(
+            json.dumps(run_rows, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (output / "stage_answers.json").write_text(
+            json.dumps(stage_rows, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     return summary
 
 
@@ -283,6 +278,106 @@ def summarize(
     }
 
 
+def wilson_interval(successes: int, trials: int, confidence: float = 0.95) -> tuple[float, float]:
+    if trials <= 0:
+        return 0.0, 0.0
+    z = 1.95996  # for 95% confidence
+    p = successes / trials
+    denominator = 1 + z**2 / trials
+    center = (p + z**2 / (2 * trials)) / denominator
+    spread = z * math.sqrt((p * (1 - p) / trials) + z**2 / (4 * trials**2)) / denominator
+    return max(0.0, center - spread), min(1.0, center + spread)
+
+
+def task_clustered_bootstrap_ci(
+    diffs_by_task: dict[str, list[float | int]],
+    num_replicates: int = 1000,
+    confidence_level: float = 0.95
+) -> tuple[float, float]:
+    tasks = list(diffs_by_task.keys())
+    if not tasks:
+        return 0.0, 0.0
+    
+    replicates = []
+    rng = random.Random(42)
+    
+    for _ in range(num_replicates):
+        sampled_tasks = rng.choices(tasks, k=len(tasks))
+        total_diff = 0.0
+        total_count = 0
+        for t in sampled_tasks:
+            vals = diffs_by_task[t]
+            total_diff += sum(vals)
+            total_count += len(vals)
+        replicates.append(total_diff / total_count if total_count > 0 else 0.0)
+    
+    replicates.sort()
+    alpha = 1.0 - confidence_level
+    low_idx = int(num_replicates * (alpha / 2))
+    high_idx = int(num_replicates * (1.0 - alpha / 2))
+    return replicates[low_idx], replicates[high_idx]
+
+
+def compute_calibration_metrics(run_rows: list[dict[str, Any]], num_bins: int = 10) -> dict[str, Any] | None:
+    valid_runs = []
+    for r in run_rows:
+        conf = r.get("grader_confidence")
+        if conf is None:
+            conf = r.get("confidence")
+        if conf is not None and r.get("correct") is not None:
+            try:
+                c_val = float(conf)
+                if c_val > 1.0:
+                    c_val /= 100.0
+                c_val = max(0.0, min(1.0, c_val))
+                valid_runs.append((c_val, 1.0 if r["correct"] else 0.0))
+            except (ValueError, TypeError):
+                pass
+                
+    if not valid_runs:
+        return None
+        
+    n = len(valid_runs)
+    brier_score = sum((f - o) ** 2 for f, o in valid_runs) / n
+    
+    bins = [[] for _ in range(num_bins)]
+    for f, o in valid_runs:
+        bin_idx = min(int(f * num_bins), num_bins - 1)
+        bins[bin_idx].append((f, o))
+        
+    ece = 0.0
+    bin_details = []
+    for idx, bin_items in enumerate(bins):
+        bin_start = idx / num_bins
+        bin_end = (idx + 1) / num_bins
+        if not bin_items:
+            bin_details.append({
+                "bin_start": bin_start,
+                "bin_end": bin_end,
+                "count": 0,
+                "avg_confidence": 0.0,
+                "accuracy": 0.0
+            })
+            continue
+        bin_count = len(bin_items)
+        avg_conf = sum(item[0] for item in bin_items) / bin_count
+        acc = sum(item[1] for item in bin_items) / bin_count
+        ece += (bin_count / n) * abs(acc - avg_conf)
+        bin_details.append({
+            "bin_start": bin_start,
+            "bin_end": bin_end,
+            "count": bin_count,
+            "avg_confidence": avg_conf,
+            "accuracy": acc
+        })
+        
+    return {
+        "brier_score": brier_score,
+        "expected_calibration_error": ece,
+        "bins": bin_details
+    }
+
+
 def paired_comparisons(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_condition: dict[str, dict[tuple[str, str], dict[str, Any]]] = defaultdict(
         dict
@@ -306,6 +401,19 @@ def paired_comparisons(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         count = len(matched)
         accuracy_a = correct_a / count if count else None
         accuracy_b = correct_b / count if count else None
+        
+        diffs_by_task = defaultdict(list)
+        for key in matched:
+            task_id, repetition = key
+            val_a = 1 if bool(by_condition[condition_a][key]["correct"]) else 0
+            val_b = 1 if bool(by_condition[condition_b][key]["correct"]) else 0
+            diffs_by_task[task_id].append(val_b - val_a)
+            
+        if count > 0:
+            ci_lower, ci_upper = task_clustered_bootstrap_ci(diffs_by_task)
+        else:
+            ci_lower, ci_upper = None, None
+            
         comparisons.append(
             {
                 "condition_a": condition_a,
@@ -316,6 +424,8 @@ def paired_comparisons(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "accuracy_delta_b_minus_a": (
                     accuracy_b - accuracy_a if count else None
                 ),
+                "accuracy_delta_ci_lower": ci_lower,
+                "accuracy_delta_ci_upper": ci_upper,
             }
         )
     return comparisons
@@ -482,6 +592,12 @@ def _condition_summary(
     correct = sum(row["correct"] is True for row in rows)
     cost = sum(float(row["cost_usd"]) for row in rows)
     tokens = sum(int(row["total_tokens"]) for row in rows)
+    
+    planned_ci_lower, planned_ci_upper = wilson_interval(correct, expected)
+    graded_correct = sum(row["correct"] is True for row in graded)
+    graded_ci_lower, graded_ci_upper = wilson_interval(graded_correct, len(graded))
+    calibration = compute_calibration_metrics(rows)
+    
     return {
         "condition": condition,
         "workflow": next(
@@ -504,6 +620,8 @@ def _condition_summary(
         "retried_jobs": sum(int(row["attempt_count"] > 1) for row in rows),
         "coverage_rate": len(valid) / expected if expected else 0.0,
         "planned_job_accuracy": correct / expected if expected else 0.0,
+        "planned_job_accuracy_ci_lower": planned_ci_lower,
+        "planned_job_accuracy_ci_upper": planned_ci_upper,
         "valid_completed_accuracy": (
             sum(row["correct"] is True for row in valid)
             / sum(row["correct"] is not None for row in valid)
@@ -511,6 +629,8 @@ def _condition_summary(
             else None
         ),
         "graded_accuracy": correct / len(graded) if graded else None,
+        "graded_accuracy_ci_lower": graded_ci_lower,
+        "graded_accuracy_ci_upper": graded_ci_upper,
         "correct_valid_completed": sum(
             row["correct"] is True for row in valid
         ),
@@ -528,6 +648,7 @@ def _condition_summary(
             if expected
             else 0.0
         ),
+        "calibration": calibration,
     }
 
 

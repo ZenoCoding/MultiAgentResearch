@@ -16,7 +16,14 @@ def test_representative_experiment_config_expands_requested_matrix() -> None:
 
     assert config.experiment_id == "hle-representative-40-scaling-v1"
     assert config.tasks_path == "benchmarks/hle-representative-40/tasks.jsonl"
+    assert (
+        config.aggregation_judge_model
+        == "gpt-5.4-mini-2026-03-17"
+    )
     assert len(conditions) == 35
+    assert {
+        condition.judge_reasoning_effort for condition in conditions.values()
+    } == {"low"}
 
     assert {
         condition.reasoning_effort

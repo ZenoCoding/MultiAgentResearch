@@ -1,0 +1,28 @@
+{
+  "schema_version": "1",
+  "source_task_set": "benchmarks/hle-representative-40/tasks.jsonl",
+  "source_manifest": "benchmarks/hle-representative-40/manifest.json",
+  "source_benchmark": "cais/hle",
+  "source_version": "cais/hle",
+  "seed": 20260612,
+  "selection_rationale": "Deterministic fixed-ID smoke subset selected from the representative 40 to satisfy the exact 2 MCQ and 3 short-answer quotas, cover five subjects, and keep prompts compact enough for a low-cost end-to-end run. The source_ids array is the canonical selection and order for seed 20260612.",
+  "sample_size": 5,
+  "answer_type_counts": {
+    "multiple_choice": 2,
+    "short_answer": 3
+  },
+  "subject_counts": {
+    "Biology/Medicine": 1,
+    "Chemistry": 1,
+    "Math": 1,
+    "Other": 1,
+    "Physics": 1
+  },
+  "source_ids": [
+    "671f449c879059a81a74468c",
+    "670f00dc79750a6c73259f4d",
+    "670147f7dc193e3fa8260419",
+    "66ea814c5544860edb5aa9fa",
+    "6702db18a423c5b9f9c1c49c"
+  ]
+}

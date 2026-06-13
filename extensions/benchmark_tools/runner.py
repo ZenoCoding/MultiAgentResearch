@@ -6,7 +6,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import random
-from typing import Any
+from typing import Any, Callable
 
 from dotenv import load_dotenv
 
@@ -132,6 +132,8 @@ async def run_benchmark(
     required_answer_type: str | None = None,
     experiment_metadata: dict[str, Any] | None = None,
     llm: LLMClient | None = None,
+    event_handler: Callable[[dict[str, Any]], None] | None = None,
+    emit_json_events: bool = True,
     sleep=asyncio.sleep,  # type: ignore[no-untyped-def]
     random_source=random.random,
 ) -> dict[str, Any]:
@@ -256,6 +258,7 @@ async def run_benchmark(
         llm or LiteLLMClient(),
         limiter=limiter,
         estimated_tokens=estimated_tokens_per_request,
+        event_handler=event_handler,
     )
     runner = ExperimentRunner(
         llm=limited_llm,
@@ -273,6 +276,15 @@ async def run_benchmark(
     summaries: list[dict[str, Any]] = []
 
     jobs = _jobs_to_run(ledger, max_attempts=max_attempts)
+    if event_handler:
+        event_handler(
+            {
+                "event": "benchmark_started",
+                "total_jobs": len(ledger.jobs),
+                "scheduled_jobs": len(jobs),
+                "completed_jobs": len(ledger.jobs) - len(jobs),
+            }
+        )
 
     async def run_one(job: JobSpec) -> dict[str, Any]:
         condition = condition_by_id[job.condition_id]
@@ -282,6 +294,14 @@ async def run_benchmark(
                 async with ledger_lock:
                     attempt = ledger.start_attempt(job.job_id)
                     save_ledger(ledger_path, ledger)
+                if event_handler:
+                    event_handler(
+                        {
+                            "event": "attempt_started",
+                            "job_id": job.job_id,
+                            "attempt": attempt.number,
+                        }
+                    )
                 try:
                     result = await runner.run(
                         task=task_from_example(
@@ -355,32 +375,42 @@ async def run_benchmark(
                     "final_answer": result.final_answer,
                     "cost_usd": result.metrics.cost_usd,
                     "total_tokens": result.metrics.total_tokens,
+                    "output_tokens": result.metrics.output_tokens,
                     "retryable": decision.retryable,
                     "retry_reason": decision.reason,
                 }
-                print(json.dumps(summary, sort_keys=True), flush=True)
+                if event_handler:
+                    event_handler(
+                        {
+                            "event": "attempt_completed",
+                            **summary,
+                            "will_retry": should_retry,
+                        }
+                    )
+                if emit_json_events:
+                    print(json.dumps(summary, sort_keys=True), flush=True)
 
                 if not should_retry:
                     return summary
 
                 assert delay is not None
-                print(
-                    json.dumps(
-                        {
-                            "event": "retry_scheduled",
-                            "job_id": job.job_id,
-                            "attempt": attempt.number,
-                            "delay_seconds": delay,
-                            "reason": decision.reason,
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
+                retry_event = {
+                    "event": "retry_scheduled",
+                    "job_id": job.job_id,
+                    "attempt": attempt.number,
+                    "delay_seconds": delay,
+                    "reason": decision.reason,
+                }
+                if event_handler:
+                    event_handler(retry_event)
+                if emit_json_events:
+                    print(json.dumps(retry_event, sort_keys=True), flush=True)
                 await sleep(delay)
 
     if jobs:
         summaries.extend(await asyncio.gather(*(run_one(job) for job in jobs)))
+    if event_handler:
+        event_handler({"event": "benchmark_finished"})
     return {
         "dry_run": False,
         **plan,
@@ -397,10 +427,12 @@ class RateLimitedLLMClient:
         *,
         limiter: AsyncRateLimiter,
         estimated_tokens: int,
+        event_handler: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.wrapped = wrapped
         self.limiter = limiter
         self.estimated_tokens = estimated_tokens
+        self.event_handler = event_handler
 
     async def complete(self, **kwargs: Any) -> ModelCallRecord:
         lease = await self.limiter.acquire(estimated_tokens=self.estimated_tokens)
@@ -418,6 +450,15 @@ class RateLimitedLLMClient:
                 "rate_limit": asdict(lease.metadata),
             }
             await lease.reconcile_tokens(call.usage.total_tokens or 0)
+            if self.event_handler:
+                self.event_handler(
+                    {
+                        "event": "model_call_completed",
+                        "model": call.response_model or call.requested_model,
+                        "output_tokens": call.usage.output_tokens or 0,
+                        "latency_ms": call.latency_ms,
+                    }
+                )
             return call
         finally:
             lease.release()
@@ -625,7 +666,7 @@ def _workflow(
     if condition.workflow == "supervisor":
         supervisor = AgentSpec(
             id="supervisor",
-            model=judge_model or model,
+            model=model,
             system_prompt=SUPERVISOR_SYSTEM_PROMPT.template,
             system_prompt_name=SUPERVISOR_SYSTEM_PROMPT.name,
             system_prompt_version=SUPERVISOR_SYSTEM_PROMPT.version,

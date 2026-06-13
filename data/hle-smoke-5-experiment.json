@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "experiment_id": "hle-smoke-5-paid-e2e-v1",
+  "tasks": "benchmarks/hle-smoke-5/tasks.jsonl",
+  "aggregation_judge_model": "gpt-5.4-mini-2026-03-17",
+  "repetitions": 1,
+  "defaults": {
+    "aggregation": "plurality_vote",
+    "vote_tie_break": "judge",
+    "debate_peer_view": "full_response",
+    "include_confidence": false,
+    "judge_reasoning_effort": "low"
+  },
+  "families": {
+    "solo": {
+      "efforts": [
+        "low"
+      ]
+    },
+    "self_critic": [
+      {
+        "effort": "low",
+        "rounds": [
+          1
+        ]
+      }
+    ],
+    "sampling": [
+      {
+        "effort": "low",
+        "agents": [
+          3
+        ]
+      }
+    ],
+    "debate": [
+      {
+        "effort": "low",
+        "agent_round_pairs": [
+          [
+            2,
+            1
+          ]
+        ]
+      }
+    ],
+    "supervisor_worker": [
+      {
+        "worker_effort": "low",
+        "supervisor_effort": "low",
+        "max_rounds": [
+          1
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "cais/hle",
+    "purpose": "First paid mixed-HLE end-to-end smoke run",
+    "logical_jobs": 25,
+    "task_mix": "2 canonical multiple-choice and 3 canonical short-answer tasks across five subjects",
+    "aggregation_judge_model": "gpt-5.4-mini-2026-03-17",
+    "aggregation_judge_reasoning_effort": "low",
+    "supervisor_model": "primary"
+  }
+}

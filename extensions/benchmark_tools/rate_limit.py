@@ -233,6 +233,10 @@ class RetryPolicy:
         return max(backoff, retry_after_seconds or 0.0)
 
 
+class RetryableContractError(ValueError):
+    """A model response violated a contract and may succeed on retry."""
+
+
 def classify_retry(
     error: BaseException,
     *,
@@ -242,6 +246,8 @@ def classify_retry(
 
     if isinstance(error, asyncio.CancelledError):
         return RetryDecision(False, "cancelled")
+    if isinstance(error, RetryableContractError):
+        return RetryDecision(True, "invalid_model_output")
     if isinstance(error, (ValueError, TypeError, KeyError, AssertionError, AttributeError)):
         return RetryDecision(False, "contract_or_programming_error")
 

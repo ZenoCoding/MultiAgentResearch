@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "source_task_set": "benchmarks/hle-representative-40/tasks.jsonl",
+  "source_benchmark": "cais/hle",
+  "source_version": "cais/hle",
+  "selection_rationale": "Fixed compact MCQ and SAQ pair for exercising every full-pilot workflow, effort, agent-count, and round configuration before the 40-task launch.",
+  "sample_size": 2,
+  "answer_type_counts": {
+    "multiple_choice": 1,
+    "short_answer": 1
+  },
+  "subject_counts": {
+    "Math": 1,
+    "Other": 1
+  },
+  "source_ids": [
+    "671f449c879059a81a74468c",
+    "670147f7dc193e3fa8260419"
+  ]
+}

@@ -296,3 +296,36 @@ def test_success_outcome_requires_an_answer(answer: str, expected: str) -> None:
         [_result(run_id="run", condition="solo", answer=answer)]
     )
     assert rows[0]["outcome"] == expected
+
+
+def test_wilson_interval() -> None:
+    from extensions.benchmark_tools.analysis import wilson_interval
+    low, high = wilson_interval(0, 10)
+    assert low == 0.0
+    assert high > 0.0
+    
+    low, high = wilson_interval(5, 10)
+    assert 0.0 < low < 0.5 < high < 1.0
+
+
+def test_task_clustered_bootstrap_ci() -> None:
+    from extensions.benchmark_tools.analysis import task_clustered_bootstrap_ci
+    diffs = {
+        "task-1": [1, 1],
+        "task-2": [-1, -1],
+    }
+    low, high = task_clustered_bootstrap_ci(diffs, num_replicates=50)
+    assert -1.0 <= low <= high <= 1.0
+
+
+def test_calibration_metrics() -> None:
+    from extensions.benchmark_tools.analysis import compute_calibration_metrics
+    run_rows = [
+        {"grader_confidence": 90, "correct": True},
+        {"grader_confidence": 10, "correct": False},
+    ]
+    metrics = compute_calibration_metrics(run_rows)
+    assert metrics is not None
+    assert abs(metrics["brier_score"] - 0.01) < 1e-5
+    assert metrics["expected_calibration_error"] >= 0.0
+

@@ -126,6 +126,24 @@ def test_retry_exhaustion_and_inconclusive_policy() -> None:
     assert inconclusive_id not in {job.job_id for job in selected}
 
 
+def test_cancelled_jobs_are_requeued_without_erasing_attempt_history() -> None:
+    current = manifest(repetitions=1)
+    ledger = ExperimentLedger.create(current, ["task-a", "task-b"])
+    selected = next(iter(ledger.jobs))
+    ledger.start_attempt(selected)
+    ledger.finish_attempt(
+        selected,
+        JobState.FAILED,
+        error="retryable:cancelled",
+    )
+
+    assert ledger.requeue_cancelled_jobs() == 1
+    assert ledger.jobs[selected].state == JobState.PENDING
+    assert ledger.jobs[selected].attempt_count == 1
+    assert ledger.jobs[selected].attempts[0].state == JobState.FAILED
+    assert ledger.jobs[selected].latest_error == "retryable:cancelled"
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -136,7 +154,6 @@ def test_retry_exhaustion_and_inconclusive_policy() -> None:
         ("repetitions", 3),
         ("generation_settings", {"temperature": 0.5}),
         ("system_settings", {"system_prompt": "Different."}),
-        ("policy", ExecutionPolicy(concurrency=8, max_attempts=5)),
     ],
 )
 def test_manifest_mismatch_refuses_material_changes(field: str, value: object) -> None:
@@ -156,3 +173,19 @@ def test_manifest_allows_non_material_resume_changes() -> None:
     )
 
     original.assert_compatible(relocated)
+
+
+def test_manifest_allows_operational_policy_changes() -> None:
+    original = manifest()
+    safer = replace(
+        original,
+        policy=ExecutionPolicy(
+            concurrency=4,
+            max_in_flight_requests=3,
+            tokens_per_minute=150_000,
+            max_attempts=4,
+            request_max_attempts=3,
+        ),
+    )
+
+    original.assert_compatible(safer)

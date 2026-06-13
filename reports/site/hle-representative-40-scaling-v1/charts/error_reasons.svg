@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-label="Incorrect answer reasons">
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #111827; }
+.title { font-size: 22px; font-weight: 700; }
+.tick { font-size: 11px; }
+.value { font-size: 12px; font-weight: 650; }
+.axis-label { font-size: 13px; font-weight: 650; }
+</style>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="24" y="34" class="title">Incorrect answer reasons</text>
+<rect x="82.0" y="349.7" width="171.0" height="0.3" fill="#2563eb"/><rect x="277.0" y="212.4" width="171.0" height="137.6" fill="#16a34a"/><rect x="472.0" y="70.0" width="171.0" height="280.0" fill="#dc2626"/><rect x="667.0" y="344.2" width="171.0" height="5.8" fill="#9333ea"/><text x="167.5" y="341.7" text-anchor="middle" class="value">1.00</text><text x="167.5" y="390" text-anchor="middle" class="tick">correct_contract_invalid</text><text x="362.5" y="204.4" text-anchor="middle" class="value">400.00</text><text x="362.5" y="390" text-anchor="middle" class="tick">missing</text><text x="557.5" y="62.0" text-anchor="middle" class="value">814.00</text><text x="557.5" y="390" text-anchor="middle" class="tick">model_error</text><text x="752.5" y="336.2" text-anchor="middle" class="value">17.00</text><text x="752.5" y="390" text-anchor="middle" class="tick">provider_execution_failure</text><line x1="70" y1="350" x2="850" y2="350" stroke="#111827"/><line x1="70" y1="70" x2="70" y2="350" stroke="#111827"/>
+</svg>

@@ -21,6 +21,14 @@ from multi_agent_research.models import (
 
 
 class LiteLLMClient:
+    DEFAULT_TIMEOUT_SECONDS = 86400.0
+    TIMEOUT_SECONDS_BY_EFFORT = {
+        "none": 86400.0,
+        "low": 86400.0,
+        "medium": 86400.0,
+        "high": 86400.0,
+        "xhigh": 86400.0,
+    }
     DISALLOWED_HIDDEN_RELIABILITY_PARAMS = {
         "fallbacks",
         "context_window_fallback_dict",
@@ -45,6 +53,13 @@ class LiteLLMClient:
             message.model_dump(exclude_none=True) for message in messages
         ]
         request_parameters = self._request_parameters(agent)
+        request_parameters.setdefault(
+            "timeout",
+            self.TIMEOUT_SECONDS_BY_EFFORT.get(
+                agent.reasoning_effort or "",
+                self.DEFAULT_TIMEOUT_SECONDS,
+            ),
+        )
 
         try:
             response = await litellm.acompletion(
@@ -165,13 +180,25 @@ class LiteLLMClient:
     @staticmethod
     def _error_details(exc: Exception) -> dict[str, Any]:
         details = {}
-        for name in ("status_code", "code", "param", "type", "body"):
+        for name in (
+            "status_code",
+            "code",
+            "param",
+            "type",
+            "body",
+            "retry_after",
+            "headers",
+        ):
             value = getattr(exc, name, None)
+            if value is None and name == "headers":
+                response = getattr(exc, "response", None)
+                value = getattr(response, "headers", None)
             if value is None:
                 continue
             try:
-                json.dumps(value)
-                details[name] = value
+                serializable = dict(value) if name == "headers" else value
+                json.dumps(serializable)
+                details[name] = serializable
             except (TypeError, ValueError):
                 details[name] = str(value)
         return details

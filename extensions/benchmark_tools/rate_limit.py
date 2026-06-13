@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import random
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
@@ -101,6 +102,39 @@ class AsyncRateLimiter:
         self._in_flight = asyncio.Semaphore(max_in_flight)
         self._rate_lock = asyncio.Lock()
         self._reservations: deque[_Reservation] = deque()
+        self._cooldown_until = 0.0
+
+    async def impose_cooldown(self, seconds: float) -> None:
+        """Delay all future acquisitions after a provider-wide rate limit."""
+
+        if seconds < 0:
+            raise ValueError("cooldown seconds must be non-negative")
+        async with self._rate_lock:
+            self._cooldown_until = max(
+                self._cooldown_until,
+                self._clock() + seconds,
+            )
+
+    async def cap_tokens_per_minute(
+        self,
+        provider_limit: int,
+        *,
+        headroom_ratio: float = 0.9,
+    ) -> int:
+        """Lower the local TPM ceiling when the provider reports a smaller one."""
+
+        if provider_limit < 1:
+            raise ValueError("provider_limit must be positive")
+        if not 0 < headroom_ratio <= 1:
+            raise ValueError("headroom_ratio must be between 0 and 1")
+        adjusted_limit = max(1, int(provider_limit * headroom_ratio))
+        async with self._rate_lock:
+            if (
+                self.tokens_per_minute is None
+                or adjusted_limit < self.tokens_per_minute
+            ):
+                self.tokens_per_minute = adjusted_limit
+            return self.tokens_per_minute
 
     async def acquire(self, *, estimated_tokens: int = 0) -> RateLimitLease:
         """Reserve rate budget, then acquire a global in-flight slot.
@@ -142,7 +176,10 @@ class AsyncRateLimiter:
             async with self._rate_lock:
                 now = self._clock()
                 self._prune(now)
-                delay = self._required_delay(now, estimated_tokens)
+                delay = max(
+                    self._cooldown_until - now,
+                    self._required_delay(now, estimated_tokens),
+                )
                 if delay <= 0:
                     reservation = _Reservation(now, estimated_tokens)
                     self._reservations.append(reservation)
@@ -248,7 +285,9 @@ def classify_retry(
         return RetryDecision(False, "cancelled")
     if isinstance(error, RetryableContractError):
         return RetryDecision(True, "invalid_model_output")
-    if isinstance(error, (ValueError, TypeError, KeyError, AssertionError, AttributeError)):
+    if isinstance(
+        error, (ValueError, TypeError, KeyError, AssertionError, AttributeError)
+    ):
         return RetryDecision(False, "contract_or_programming_error")
 
     status_code = _status_code(error)
@@ -265,6 +304,23 @@ def classify_retry(
     if isinstance(error, (TimeoutError, ConnectionError)):
         return RetryDecision(True, type(error).__name__.lower())
     return RetryDecision(False, "non_transient_error", status_code, retry_after)
+
+
+def provider_tpm_limit(error: BaseException) -> int | None:
+    """Read a provider-reported TPM ceiling from a normalized rate-limit error."""
+
+    record = getattr(error, "record", None)
+    record_error = getattr(record, "error", None)
+    messages = [str(error), str(getattr(record_error, "message", "") or "")]
+    for message in messages:
+        match = re.search(
+            r"tokens per min(?:ute)?\s*\(TPM\).*?Limit\s+([0-9][0-9,]*)",
+            message,
+            re.IGNORECASE,
+        )
+        if match:
+            return int(match.group(1).replace(",", ""))
+    return None
 
 
 async def retry_call(
@@ -346,6 +402,15 @@ def _retry_after(error: BaseException, *, wall_clock: Clock) -> float | None:
             None,
         )
     if value is None:
+        message = str(error)
+        match = re.search(
+            r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|milliseconds?|s|seconds?)",
+            message,
+            re.IGNORECASE,
+        )
+        if match:
+            parsed = float(match.group(1))
+            return parsed / 1000.0 if match.group(2).lower().startswith("m") else parsed
         return None
     try:
         return max(0.0, float(value))

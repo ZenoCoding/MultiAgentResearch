@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -47,11 +48,13 @@ async def test_pipeline_runs_all_stages_and_returns_summary(
 ) -> None:
     config = _write_config(tmp_path)
     stages = []
+    run_kwargs = {}
 
     async def fake_preflight(**kwargs):  # type: ignore[no-untyped-def]
         return {"status": "passed", "call_count": 2}
 
     async def fake_run(**kwargs):  # type: ignore[no-untyped-def]
+        run_kwargs.update(kwargs)
         return {"scheduled_jobs": 1}
 
     async def fake_grade(**kwargs):  # type: ignore[no-untyped-def]
@@ -73,9 +76,12 @@ async def test_pipeline_runs_all_stages_and_returns_summary(
         config_path=config,
         model="fake/model",
         results_dir=tmp_path / "results",
+        excluded_workflows={"debate"},
         stage_handler=lambda name, data: stages.append(name),
     )
 
+    assert result["run"]["scheduled_jobs"] == 1
+    assert run_kwargs["excluded_workflows"] == {"debate"}
     assert stages == [
         "preflight_started",
         "preflight_finished",
@@ -167,6 +173,44 @@ async def test_pipeline_raises_structured_preflight_failure(
         )
 
     assert exc_info.value.summary is failed
+
+
+@pytest.mark.asyncio
+async def test_pipeline_stops_after_a_drained_run(tmp_path, monkeypatch) -> None:
+    config = _write_config(tmp_path)
+    drain_event = asyncio.Event()
+    drain_event.set()
+
+    monkeypatch.setattr(
+        pipeline,
+        "preflight_experiment",
+        lambda **kwargs: _async_value({"status": "passed"}),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "run_benchmark",
+        lambda **kwargs: _async_value({"started_jobs": 1, "drained_jobs": 2}),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "grade_experiment",
+        lambda **kwargs: pytest.fail("grading should not run after drain"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "analyze_experiment",
+        lambda **kwargs: pytest.fail("analysis should not run after drain"),
+    )
+
+    result = await pipeline.run_experiment_pipeline(
+        config_path=config,
+        model="fake/model",
+        results_dir=tmp_path / "results",
+        drain_event=drain_event,
+    )
+
+    assert result["drained"] is True
+    assert result["summary"] is None
 
 
 async def _async_value(value):  # type: ignore[no-untyped-def]

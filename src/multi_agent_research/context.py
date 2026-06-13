@@ -37,11 +37,13 @@ class RunContext:
         task: TaskInput,
         workflow_name: str,
         llm: LLMClient,
+        call_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.run_id = run_id
         self.task = task
         self.workflow_name = workflow_name
         self.llm = llm
+        self.call_metadata = dict(call_metadata or {})
         self.calls: list[ModelCallRecord] = []
         self.stage_answers: list[StageAnswer] = []
         self.events: list[WorkflowEvent] = []
@@ -68,6 +70,10 @@ class RunContext:
         system_reference = system_prompt_reference(agent)
         if system_reference:
             references.insert(0, system_reference)
+        call_metadata = {
+            **self.call_metadata,
+            **(metadata or {}),
+        }
         self.emit("model_call_started", step=step, agent_id=agent.id)
         try:
             call = await self.llm.complete(
@@ -79,7 +85,7 @@ class RunContext:
                 agent=agent,
                 messages=messages,
                 prompt_references=references,
-                metadata=metadata,
+                metadata=call_metadata,
             )
         except LLMCallError as exc:
             self.calls.append(exc.record)
@@ -106,7 +112,7 @@ class RunContext:
                 kind=answer_kind,
                 agent_id=agent.id,
                 call_id=call.id,
-                metadata=metadata,
+                metadata=call_metadata,
                 sequence=sequence,
             )
         return response

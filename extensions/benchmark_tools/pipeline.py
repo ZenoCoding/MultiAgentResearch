@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,11 +37,18 @@ async def run_experiment_pipeline(
     requests_per_minute: int | None = None,
     tokens_per_minute: int | None = None,
     max_attempts: int = 3,
+    request_max_attempts: int = 3,
+    request_retry_base_delay_seconds: float = 1.0,
+    request_retry_max_delay_seconds: float = 60.0,
+    request_retry_jitter_ratio: float = 0.2,
+    excluded_workflows: set[str] | None = None,
+    excluded_reasoning_efforts: set[str] | None = None,
     skip_preflight: bool = False,
     skip_grading: bool = False,
     html: bool = False,
     event_handler: Callable[[dict[str, Any]], None] | None = None,
     stage_handler: Callable[[str, dict[str, Any]], None] | None = None,
+    drain_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     config = load_experiment_config(config_path)
     experiment_root = Path(results_dir) / config.experiment_id
@@ -51,9 +59,7 @@ async def run_experiment_pipeline(
         preflight_summary = {
             "status": "skipped",
             "reason": (
-                "disabled"
-                if skip_preflight
-                else "existing experiment manifest"
+                "disabled" if skip_preflight else "existing experiment manifest"
             ),
         }
         _stage(stage_handler, "preflight_skipped", preflight_summary)
@@ -87,11 +93,27 @@ async def run_experiment_pipeline(
         tokens_per_minute=tokens_per_minute,
         repetitions=config.repetitions,
         max_attempts=max_attempts,
+        request_max_attempts=request_max_attempts,
+        request_retry_base_delay_seconds=request_retry_base_delay_seconds,
+        request_retry_max_delay_seconds=request_retry_max_delay_seconds,
+        request_retry_jitter_ratio=request_retry_jitter_ratio,
+        excluded_workflows=excluded_workflows,
+        excluded_reasoning_efforts=excluded_reasoning_efforts,
         experiment_metadata=config.metadata,
         event_handler=event_handler,
         emit_json_events=False,
+        drain_event=drain_event,
     )
     _stage(stage_handler, "run_finished", run_summary)
+    if drain_event is not None and drain_event.is_set():
+        return {
+            "preflight": preflight_summary,
+            "run": run_summary,
+            "grading": None,
+            "summary": None,
+            "site_path": None,
+            "drained": True,
+        }
 
     grade_summary: dict[str, Any] | None = None
     grade_set_id: str | None = None
@@ -136,6 +158,7 @@ async def run_experiment_pipeline(
         "grading": grade_summary,
         "summary": summary,
         "site_path": str(site_path) if site_path else None,
+        "drained": False,
     }
 
 

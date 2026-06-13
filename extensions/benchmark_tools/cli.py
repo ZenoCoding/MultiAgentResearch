@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Awaitable, Callable
 import json
+import os
 from pathlib import Path
+import signal
+import sys
+from typing import TypeVar
 
 from extensions.benchmark_tools.analysis import analyze_experiment
 from extensions.benchmark_tools.charts import write_charts
@@ -25,6 +30,45 @@ from extensions.benchmark_tools.runner import load_conditions, run_benchmark
 from extensions.benchmark_tools.site import build_site
 
 
+T = TypeVar("T")
+
+
+async def _run_with_graceful_drain(
+    operation: Callable[[asyncio.Event], Awaitable[T]],
+) -> T:
+    drain_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    installed = False
+
+    def request_drain() -> None:
+        if drain_event.is_set():
+            return
+        drain_event.set()
+        print(
+            "\nDrain requested: finishing active model calls; "
+            "queued jobs will remain pending.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    if hasattr(signal, "SIGUSR1"):
+        try:
+            loop.add_signal_handler(signal.SIGUSR1, request_drain)
+            installed = True
+            print(
+                f"Graceful drain: kill -USR1 {os.getpid()}",
+                file=sys.stderr,
+                flush=True,
+            )
+        except (NotImplementedError, RuntimeError):
+            pass
+    try:
+        return await operation(drain_event)
+    finally:
+        if installed:
+            loop.remove_signal_handler(signal.SIGUSR1)
+
+
 def main() -> None:
     args = _parser().parse_args()
     if args.command == "sample":
@@ -41,8 +85,7 @@ def main() -> None:
     elif args.command == "validate-tasks":
         examples = load_jsonl(args.tasks)
         if args.require_answer_type and any(
-            example.answer_type != args.require_answer_type
-            for example in examples
+            example.answer_type != args.require_answer_type for example in examples
         ):
             raise ValueError(
                 f"task set contains types other than {args.require_answer_type!r}"
@@ -65,51 +108,52 @@ def main() -> None:
         if config and args.conditions:
             raise ValueError("--config and --conditions cannot be used together")
         tasks = args.tasks or (config.tasks_path if config else None)
-        experiment_id = args.experiment_id or (
-            config.experiment_id if config else None
-        )
+        experiment_id = args.experiment_id or (config.experiment_id if config else None)
         if not tasks or not experiment_id:
-            raise ValueError(
-                "run requires --tasks and --experiment-id, or a --config"
-            )
+            raise ValueError("run requires --tasks and --experiment-id, or a --config")
         conditions = (
-            list(config.conditions)
-            if config
-            else load_conditions(args.conditions)
+            list(config.conditions) if config else load_conditions(args.conditions)
         )
         judge_model = args.judge_model or (
             config.aggregation_judge_model if config else None
         )
-        repetitions = args.repetitions or (
-            config.repetitions if config else 1
-        )
+        repetitions = args.repetitions or (config.repetitions if config else 1)
         progress = TerminalProgress() if args.progress and not args.dry_run else None
         try:
             summary = asyncio.run(
-                run_benchmark(
-                    tasks_path=tasks,
-                    model=args.model,
-                    judge_model=judge_model,
-                    experiment_id=experiment_id,
-                    output_dir=args.results_dir,
-                    conditions=conditions,
-                    system_prompt=args.system_prompt,
-                    concurrency=args.concurrency,
-                    max_in_flight_requests=args.max_in_flight_requests,
-                    requests_per_minute=args.requests_per_minute,
-                    tokens_per_minute=args.tokens_per_minute,
-                    estimated_tokens_per_request=args.estimated_tokens_per_request,
-                    repetitions=repetitions,
-                    max_attempts=args.max_attempts,
-                    retry_base_delay_seconds=args.retry_base_delay,
-                    retry_max_delay_seconds=args.retry_max_delay,
-                    retry_jitter_ratio=args.retry_jitter,
-                    resume=args.resume,
-                    dry_run=args.dry_run,
-                    required_answer_type=args.require_answer_type,
-                    experiment_metadata=config.metadata if config else None,
-                    event_handler=progress.handle if progress else None,
-                    emit_json_events=progress is None,
+                _run_with_graceful_drain(
+                    lambda drain_event: run_benchmark(
+                        tasks_path=tasks,
+                        model=args.model,
+                        judge_model=judge_model,
+                        experiment_id=experiment_id,
+                        output_dir=args.results_dir,
+                        conditions=conditions,
+                        system_prompt=args.system_prompt,
+                        concurrency=args.concurrency,
+                        max_in_flight_requests=args.max_in_flight_requests,
+                        requests_per_minute=args.requests_per_minute,
+                        tokens_per_minute=args.tokens_per_minute,
+                        estimated_tokens_per_request=args.estimated_tokens_per_request,
+                        repetitions=repetitions,
+                        max_attempts=args.max_attempts,
+                        retry_base_delay_seconds=args.retry_base_delay,
+                        retry_max_delay_seconds=args.retry_max_delay,
+                        retry_jitter_ratio=args.retry_jitter,
+                        request_max_attempts=args.request_max_attempts,
+                        request_retry_base_delay_seconds=args.request_retry_base_delay,
+                        request_retry_max_delay_seconds=args.request_retry_max_delay,
+                        request_retry_jitter_ratio=args.request_retry_jitter,
+                        resume=args.resume,
+                        dry_run=args.dry_run,
+                        required_answer_type=args.require_answer_type,
+                        experiment_metadata=config.metadata if config else None,
+                        excluded_workflows=set(args.exclude_workflow),
+                        excluded_reasoning_efforts=set(args.exclude_reasoning_effort),
+                        event_handler=progress.handle if progress else None,
+                        emit_json_events=progress is None,
+                        drain_event=drain_event,
+                    )
                 )
             )
         finally:
@@ -127,8 +171,7 @@ def main() -> None:
                 print(f"Preflight: skipped ({data['reason']})", flush=True)
             elif name == "preflight_finished":
                 print(
-                    f"Preflight: {data['status']} "
-                    f"({data.get('call_count', 0)} calls)",
+                    f"Preflight: {data['status']} ({data.get('call_count', 0)} calls)",
                     flush=True,
                 )
             elif name == "grading_started":
@@ -143,27 +186,38 @@ def main() -> None:
         try:
             try:
                 pipeline = asyncio.run(
-                    run_experiment_pipeline(
-                        config_path=args.config,
-                        model=args.model,
-                        results_dir=args.results_dir,
-                        reports_dir=args.reports_dir,
-                        grader_model=args.grader_model,
-                        grader_reasoning_effort=args.grader_reasoning_effort,
-                        concurrency=args.concurrency,
-                        max_in_flight_requests=args.max_in_flight_requests,
-                        grading_concurrency=args.grading_concurrency,
-                        grading_max_in_flight_requests=(
-                            args.grading_max_in_flight_requests
-                        ),
-                        requests_per_minute=args.requests_per_minute,
-                        tokens_per_minute=args.tokens_per_minute,
-                        max_attempts=args.max_attempts,
-                        skip_preflight=args.skip_preflight,
-                        skip_grading=args.skip_grading,
-                        html=args.html,
-                        event_handler=progress.handle,
-                        stage_handler=stage,
+                    _run_with_graceful_drain(
+                        lambda drain_event: run_experiment_pipeline(
+                            config_path=args.config,
+                            model=args.model,
+                            results_dir=args.results_dir,
+                            reports_dir=args.reports_dir,
+                            grader_model=args.grader_model,
+                            grader_reasoning_effort=args.grader_reasoning_effort,
+                            concurrency=args.concurrency,
+                            max_in_flight_requests=args.max_in_flight_requests,
+                            grading_concurrency=args.grading_concurrency,
+                            grading_max_in_flight_requests=(
+                                args.grading_max_in_flight_requests
+                            ),
+                            requests_per_minute=args.requests_per_minute,
+                            tokens_per_minute=args.tokens_per_minute,
+                            max_attempts=args.max_attempts,
+                            request_max_attempts=args.request_max_attempts,
+                            request_retry_base_delay_seconds=args.request_retry_base_delay,
+                            request_retry_max_delay_seconds=args.request_retry_max_delay,
+                            request_retry_jitter_ratio=args.request_retry_jitter,
+                            excluded_workflows=set(args.exclude_workflow),
+                            excluded_reasoning_efforts=set(
+                                args.exclude_reasoning_effort
+                            ),
+                            skip_preflight=args.skip_preflight,
+                            skip_grading=args.skip_grading,
+                            html=args.html,
+                            event_handler=progress.handle,
+                            stage_handler=stage,
+                            drain_event=drain_event,
+                        )
                     )
                 )
             except PreflightFailedError as exc:
@@ -177,6 +231,12 @@ def main() -> None:
                 raise SystemExit(1) from None
         finally:
             progress.close()
+        if pipeline["drained"]:
+            print(
+                f"Drained cleanly after {pipeline['run']['started_jobs']} jobs; "
+                f"{pipeline['run']['drained_jobs']} queued jobs remain pending."
+            )
+            return
         print(render_results(pipeline["summary"]))
         if pipeline["site_path"]:
             print(f"\nHTML: {pipeline['site_path']}")
@@ -214,9 +274,7 @@ def main() -> None:
     elif args.command == "results":
         config = load_experiment_config(args.config) if args.config else None
         tasks = args.tasks or (config.tasks_path if config else None)
-        experiment_id = args.experiment_id or (
-            config.experiment_id if config else None
-        )
+        experiment_id = args.experiment_id or (config.experiment_id if config else None)
         if not tasks or not experiment_id:
             raise ValueError(
                 "results requires --tasks and --experiment-id, or a --config"
@@ -261,6 +319,7 @@ def main() -> None:
         print(index)
     elif args.command == "dashboard":
         from extensions.benchmark_tools.dashboard import serve
+
         serve(
             results_dir=args.results_dir,
             port=args.port,
@@ -305,7 +364,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="benchmark-tools")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sample = sub.add_parser("sample", help="Create a deterministic fixed benchmark sample.")
+    sample = sub.add_parser(
+        "sample", help="Create a deterministic fixed benchmark sample."
+    )
     sample.add_argument("--input", required=True)
     sample.add_argument("--output-dir", required=True)
     sample.add_argument("--size", type=int, default=30)
@@ -343,6 +404,26 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--experiment-id")
     run.add_argument("--results-dir", default="results")
     run.add_argument("--conditions")
+    run.add_argument(
+        "--exclude-workflow",
+        action="append",
+        default=[],
+        metavar="WORKFLOW",
+        help=(
+            "Defer every condition using this workflow for the current invocation. "
+            "Repeat to exclude multiple workflows."
+        ),
+    )
+    run.add_argument(
+        "--exclude-reasoning-effort",
+        action="append",
+        default=[],
+        metavar="EFFORT",
+        help=(
+            "Defer conditions using this primary reasoning effort for the current "
+            "invocation. Repeat to exclude multiple efforts."
+        ),
+    )
     run.add_argument("--system-prompt", default="")
     run.add_argument(
         "--concurrency",
@@ -360,10 +441,22 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--tokens-per-minute", type=int)
     run.add_argument("--estimated-tokens-per-request", type=int, default=4096)
     run.add_argument("--repetitions", type=int)
-    run.add_argument("--max-attempts", type=int, default=3)
+    run.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help=(
+            "Maximum persisted job attempts across resumes. "
+            "Jobs are not automatically rerun in the same invocation."
+        ),
+    )
     run.add_argument("--retry-base-delay", type=float, default=1.0)
     run.add_argument("--retry-max-delay", type=float, default=30.0)
     run.add_argument("--retry-jitter", type=float, default=0.2)
+    run.add_argument("--request-max-attempts", type=int, default=3)
+    run.add_argument("--request-retry-base-delay", type=float, default=1.0)
+    run.add_argument("--request-retry-max-delay", type=float, default=60.0)
+    run.add_argument("--request-retry-jitter", type=float, default=0.2)
     run.add_argument(
         "--resume",
         action=argparse.BooleanOptionalAction,
@@ -407,7 +500,39 @@ def _parser() -> argparse.ArgumentParser:
     )
     experiment.add_argument("--requests-per-minute", type=int)
     experiment.add_argument("--tokens-per-minute", type=int)
-    experiment.add_argument("--max-attempts", type=int, default=3)
+    experiment.add_argument(
+        "--exclude-workflow",
+        action="append",
+        default=[],
+        metavar="WORKFLOW",
+        help=(
+            "Defer every condition using this workflow for the current invocation. "
+            "Repeat to exclude multiple workflows."
+        ),
+    )
+    experiment.add_argument(
+        "--exclude-reasoning-effort",
+        action="append",
+        default=[],
+        metavar="EFFORT",
+        help=(
+            "Defer conditions using this primary reasoning effort for the current "
+            "invocation. Repeat to exclude multiple efforts."
+        ),
+    )
+    experiment.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help=(
+            "Maximum persisted job attempts across resumes. "
+            "Jobs are not automatically rerun in the same invocation."
+        ),
+    )
+    experiment.add_argument("--request-max-attempts", type=int, default=3)
+    experiment.add_argument("--request-retry-base-delay", type=float, default=1.0)
+    experiment.add_argument("--request-retry-max-delay", type=float, default=60.0)
+    experiment.add_argument("--request-retry-jitter", type=float, default=0.2)
     experiment.add_argument("--skip-preflight", action="store_true")
     experiment.add_argument("--skip-grading", action="store_true")
     experiment.add_argument(
@@ -506,7 +631,9 @@ def _parser() -> argparse.ArgumentParser:
     site.add_argument("--analysis-dir", required=True)
     site.add_argument("--output-dir", required=True)
 
-    update = sub.add_parser("update-report", help="Analyze runs and rebuild the static website.")
+    update = sub.add_parser(
+        "update-report", help="Analyze runs and rebuild the static website."
+    )
     update.add_argument("--tasks", required=True)
     update.add_argument("--results-dir", default="results")
     update.add_argument("--experiment-id", required=True)
@@ -550,8 +677,14 @@ def _parser() -> argparse.ArgumentParser:
         default=True,
         help="Automatically open the dashboard in a web browser.",
     )
-    dashboard.add_argument("--port", type=int, default=8000, help="Port to run the dashboard on.")
-    dashboard.add_argument("--results-dir", default="results", help="Directory where experiment results are saved.")
+    dashboard.add_argument(
+        "--port", type=int, default=8000, help="Port to run the dashboard on."
+    )
+    dashboard.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory where experiment results are saved.",
+    )
 
     return parser
 

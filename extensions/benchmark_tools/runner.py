@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from hashlib import sha256
 import json
 from pathlib import Path
 import random
 from typing import Any, Callable
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
 from multi_agent_research.aggregation import VotingConfig
 from multi_agent_research.llm import LLMCallError, LLMClient
 from multi_agent_research.litellm_client import LiteLLMClient
-from multi_agent_research.models import AgentSpec, ModelCallRecord
+from multi_agent_research.models import AgentSpec, ModelCallRecord, utc_now
 from multi_agent_research.prompts import (
     CROSS_EXAMINATION_CHALLENGE_PROMPT,
     CROSS_EXAMINATION_CLAIM_PROMPT,
@@ -65,6 +66,7 @@ from extensions.benchmark_tools.rate_limit import (
     RetryDecision,
     RetryPolicy,
     classify_retry,
+    provider_tpm_limit,
 )
 from extensions.benchmark_tools.schema import Condition
 
@@ -127,13 +129,20 @@ async def run_benchmark(
     retry_base_delay_seconds: float = 1.0,
     retry_max_delay_seconds: float = 30.0,
     retry_jitter_ratio: float = 0.2,
+    request_max_attempts: int = 3,
+    request_retry_base_delay_seconds: float = 1.0,
+    request_retry_max_delay_seconds: float = 60.0,
+    request_retry_jitter_ratio: float = 0.2,
     resume: bool = True,
     dry_run: bool = False,
     required_answer_type: str | None = None,
     experiment_metadata: dict[str, Any] | None = None,
+    excluded_workflows: set[str] | None = None,
+    excluded_reasoning_efforts: set[str] | None = None,
     llm: LLMClient | None = None,
     event_handler: Callable[[dict[str, Any]], None] | None = None,
     emit_json_events: bool = True,
+    drain_event: asyncio.Event | None = None,
     sleep=asyncio.sleep,  # type: ignore[no-untyped-def]
     random_source=random.random,
 ) -> dict[str, Any]:
@@ -160,6 +169,32 @@ async def run_benchmark(
     condition_by_id = {condition.id: condition for condition in selected_conditions}
     if len(condition_by_id) != len(selected_conditions):
         raise ValueError("condition ids must be unique")
+    excluded_workflow_set = set(excluded_workflows or ())
+    excluded_effort_set = set(excluded_reasoning_efforts or ())
+    available_workflows = {condition.workflow for condition in selected_conditions}
+    unknown_exclusions = excluded_workflow_set - available_workflows
+    if unknown_exclusions:
+        raise ValueError(
+            "excluded workflows are not present in the experiment: "
+            + ", ".join(sorted(unknown_exclusions))
+        )
+    available_efforts = {
+        condition.reasoning_effort
+        for condition in selected_conditions
+        if condition.reasoning_effort is not None
+    }
+    unknown_effort_exclusions = excluded_effort_set - available_efforts
+    if unknown_effort_exclusions:
+        raise ValueError(
+            "excluded reasoning efforts are not present in the experiment: "
+            + ", ".join(sorted(unknown_effort_exclusions))
+        )
+    scoped_condition_ids = {
+        condition.id
+        for condition in selected_conditions
+        if condition.workflow not in excluded_workflow_set
+        and condition.reasoning_effort not in excluded_effort_set
+    }
     requires_semantic_judge = any(
         example.answer_type == "short_answer" for example in examples
     )
@@ -182,6 +217,10 @@ async def run_benchmark(
         retry_base_delay_seconds=retry_base_delay_seconds,
         retry_max_delay_seconds=retry_max_delay_seconds,
         retry_jitter_ratio=retry_jitter_ratio,
+        request_max_attempts=request_max_attempts,
+        request_retry_base_delay_seconds=request_retry_base_delay_seconds,
+        request_retry_max_delay_seconds=request_retry_max_delay_seconds,
+        request_retry_jitter_ratio=request_retry_jitter_ratio,
     )
     manifest = ExperimentManifest(
         experiment_id=experiment_id,
@@ -208,6 +247,18 @@ async def run_benchmark(
         )
         for record in planning_ledger.jobs.values()
     )
+    scoped_planning_jobs = [
+        record
+        for record in planning_ledger.jobs.values()
+        if record.spec.condition_id in scoped_condition_ids
+    ]
+    scoped_planned_calls = sum(
+        _estimated_calls(
+            condition_by_id[record.spec.condition_id],
+            planning_examples[record.spec.task_id],
+        )
+        for record in scoped_planning_jobs
+    )
     plan = {
         "experiment_id": experiment_id,
         "tasks": len(examples),
@@ -215,6 +266,11 @@ async def run_benchmark(
         "repetitions": repetitions,
         "jobs": len(examples) * len(selected_conditions) * repetitions,
         "estimated_minimum_model_calls": planned_calls,
+        "scope_conditions": len(scoped_condition_ids),
+        "scope_jobs": len(scoped_planning_jobs),
+        "scope_estimated_minimum_model_calls": scoped_planned_calls,
+        "excluded_workflows": sorted(excluded_workflow_set),
+        "excluded_reasoning_efforts": sorted(excluded_effort_set),
         "estimate_note": (
             "Excludes conditional tie-break judge calls, early supervisor "
             "approval, and the separate semantic HLE grading pass."
@@ -227,6 +283,7 @@ async def run_benchmark(
     experiment_root = results_root / experiment_id
     manifest_path = experiment_root / "experiment-manifest.json"
     ledger_path = experiment_root / "experiment-ledger.json"
+    persisted_manifest = None
     if manifest_path.exists():
         if not resume:
             raise ValueError(
@@ -242,242 +299,665 @@ async def run_benchmark(
         save_manifest(manifest_path, manifest)
 
     if ledger_path.exists():
-        ledger = load_ledger(ledger_path, manifest=manifest)
-    else:
-        ledger = ExperimentLedger.create(
-            manifest, [example.id for example in examples]
+        ledger = load_ledger(
+            ledger_path,
+            manifest=persisted_manifest or manifest,
         )
+        ledger.requeue_cancelled_jobs()
+        ledger.manifest_fingerprint = manifest.compatibility_fingerprint
+        if persisted_manifest is not None and persisted_manifest != manifest:
+            save_manifest(
+                manifest_path,
+                replace(
+                    persisted_manifest,
+                    task_set_path=manifest.task_set_path,
+                    policy=manifest.policy,
+                    metadata=manifest.metadata,
+                ),
+            )
+        save_ledger(ledger_path, ledger)
+    else:
+        ledger = ExperimentLedger.create(manifest, [example.id for example in examples])
         save_ledger(ledger_path, ledger)
 
     limiter = AsyncRateLimiter(
         max_in_flight=max_in_flight_requests,
         requests_per_minute=requests_per_minute,
         tokens_per_minute=tokens_per_minute,
+        sleep=sleep,
+    )
+    checkpointed_llm = SampleCheckpointLLMClient(
+        llm or LiteLLMClient(),
+        experiment_root=experiment_root,
+        ledger=ledger,
     )
     limited_llm = RateLimitedLLMClient(
-        llm or LiteLLMClient(),
+        checkpointed_llm,
         limiter=limiter,
         estimated_tokens=estimated_tokens_per_request,
+        retry_policy=RetryPolicy(
+            max_attempts=request_max_attempts,
+            base_delay_seconds=request_retry_base_delay_seconds,
+            max_delay_seconds=request_retry_max_delay_seconds,
+            jitter_ratio=request_retry_jitter_ratio,
+        ),
         event_handler=event_handler,
+        random_source=random_source,
     )
     runner = ExperimentRunner(
         llm=limited_llm,
         store=FileRunStore(results_root),
-    )
-    retry_policy = RetryPolicy(
-        max_attempts=max_attempts,
-        base_delay_seconds=retry_base_delay_seconds,
-        max_delay_seconds=retry_max_delay_seconds,
-        jitter_ratio=retry_jitter_ratio,
     )
     example_by_id = {example.id: example for example in examples}
     ledger_lock = asyncio.Lock()
     job_semaphore = asyncio.Semaphore(concurrency)
     summaries: list[dict[str, Any]] = []
 
-    jobs = _jobs_to_run(ledger, max_attempts=max_attempts)
+    scoped_ledger_jobs = [
+        record
+        for record in ledger.jobs.values()
+        if record.spec.condition_id in scoped_condition_ids
+    ]
+    jobs = _jobs_to_run(
+        ledger,
+        max_attempts=max_attempts,
+        allowed_condition_ids=scoped_condition_ids,
+    )
     if event_handler:
         event_handler(
             {
                 "event": "benchmark_started",
-                "total_jobs": len(ledger.jobs),
+                "experiment_id": experiment_id,
+                "purpose": manifest.metadata.get("purpose"),
+                "model": model,
+                "judge_model": judge_model,
+                "manifest_schema_version": manifest.schema_version,
+                "task_count": len(examples),
+                "condition_count": len(selected_conditions),
+                "scope_condition_count": len(scoped_condition_ids),
+                "repetitions": repetitions,
+                "concurrency": concurrency,
+                "max_in_flight_requests": max_in_flight_requests,
+                "requests_per_minute": requests_per_minute,
+                "tokens_per_minute": tokens_per_minute,
+                "estimated_minimum_model_calls": scoped_planned_calls,
+                "total_jobs": len(scoped_ledger_jobs),
                 "scheduled_jobs": len(jobs),
-                "completed_jobs": len(ledger.jobs) - len(jobs),
+                "completed_jobs": len(scoped_ledger_jobs) - len(jobs),
+                "deferred_jobs": len(ledger.jobs) - len(scoped_ledger_jobs),
+                "excluded_workflows": sorted(excluded_workflow_set),
+                "excluded_reasoning_efforts": sorted(excluded_effort_set),
             }
         )
 
-    async def run_one(job: JobSpec) -> dict[str, Any]:
+    async def run_one(job: JobSpec) -> dict[str, Any] | None:
         condition = condition_by_id[job.condition_id]
         example = example_by_id[job.task_id]
         async with job_semaphore:
-            while True:
-                async with ledger_lock:
-                    attempt = ledger.start_attempt(job.job_id)
-                    save_ledger(ledger_path, ledger)
-                if event_handler:
-                    event_handler(
-                        {
-                            "event": "attempt_started",
-                            "job_id": job.job_id,
-                            "attempt": attempt.number,
-                        }
-                    )
-                try:
-                    result = await runner.run(
-                        task=task_from_example(
-                            example,
-                            include_confidence=condition.include_confidence,
-                        ),
-                        workflow=_workflow(
-                            condition=condition,
-                            model=model,
-                            judge_model=judge_model,
-                            system_prompt=system_prompt,
-                            requires_semantic_judge=requires_semantic_judge,
-                        ),
-                        experiment_id=experiment_id,
-                    )
-                except asyncio.CancelledError:
-                    async with ledger_lock:
-                        ledger.finish_attempt(
-                            job.job_id,
-                            JobState.FAILED,
-                            error="retryable:cancelled",
-                            metadata={
-                                "retryable": True,
-                                "retry_reason": "cancelled",
-                            },
-                        )
-                        save_ledger(ledger_path, ledger)
-                    raise
-
-                decision = _retry_decision(result)
-                state = JobState(result.status)
-                error = _result_error(result, decision)
-                should_retry = (
-                    result.status == "failed"
-                    and decision.retryable
-                    and attempt.number < max_attempts
+            if drain_event is not None and drain_event.is_set():
+                return None
+            workflow = _workflow(
+                condition=condition,
+                model=model,
+                judge_model=judge_model,
+                system_prompt=system_prompt,
+                requires_semantic_judge=requires_semantic_judge,
+            )
+            async with ledger_lock:
+                attempt = ledger.start_attempt(job.job_id)
+                save_ledger(ledger_path, ledger)
+            if event_handler:
+                event_handler(
+                    {
+                        "event": "attempt_started",
+                        "job_id": job.job_id,
+                        "attempt": attempt.number,
+                        "condition": condition.id,
+                        "workflow": condition.workflow,
+                        "workflow_version": workflow.version,
+                        "agents": condition.agents,
+                        "rounds": condition.rounds,
+                        "reasoning_effort": condition.reasoning_effort,
+                        "task_id": example.id,
+                        "task_category": example.category,
+                        "task_prompt": example.prompt,
+                        "repetition": job.repetition,
+                        "estimated_model_calls": _estimated_calls(condition, example),
+                    }
                 )
-                delay = (
-                    retry_policy.delay(
-                        attempt.number,
-                        retry_after_seconds=decision.retry_after_seconds,
-                        random_value=random_source(),
-                    )
-                    if should_retry
-                    else None
+            try:
+                result = await runner.run(
+                    task=task_from_example(
+                        example,
+                        include_confidence=condition.include_confidence,
+                    ),
+                    workflow=workflow,
+                    experiment_id=experiment_id,
+                    call_metadata={
+                        "benchmark_job_id": job.job_id,
+                        "condition_id": condition.id,
+                    },
                 )
+            except asyncio.CancelledError:
                 async with ledger_lock:
                     ledger.finish_attempt(
                         job.job_id,
-                        state,
-                        run_id=result.run_id,
-                        error=error,
+                        JobState.FAILED,
+                        error="retryable:cancelled",
                         metadata={
-                            "retryable": decision.retryable,
-                            "retry_reason": decision.reason,
-                            "retry_after_seconds": decision.retry_after_seconds,
-                            "retry_delay_seconds": delay,
+                            "retryable": True,
+                            "retry_reason": "cancelled",
                         },
                     )
                     save_ledger(ledger_path, ledger)
+                raise
 
-                summary = {
-                    "job_id": job.job_id,
-                    "attempt_id": attempt.attempt_id,
-                    "attempt": attempt.number,
-                    "repetition": job.repetition,
-                    "condition": condition.id,
-                    "task_id": example.id,
-                    "run_id": result.run_id,
-                    "status": result.status,
-                    "final_answer": result.final_answer,
-                    "cost_usd": result.metrics.cost_usd,
-                    "total_tokens": result.metrics.total_tokens,
-                    "output_tokens": result.metrics.output_tokens,
-                    "retryable": decision.retryable,
-                    "retry_reason": decision.reason,
-                }
-                if event_handler:
-                    event_handler(
-                        {
-                            "event": "attempt_completed",
-                            **summary,
-                            "will_retry": should_retry,
-                        }
-                    )
-                if emit_json_events:
-                    print(json.dumps(summary, sort_keys=True), flush=True)
+            decision = _retry_decision(result)
+            state = JobState(result.status)
+            error = _result_error(result, decision)
+            async with ledger_lock:
+                ledger.finish_attempt(
+                    job.job_id,
+                    state,
+                    run_id=result.run_id,
+                    error=error,
+                    metadata={
+                        "retryable": decision.retryable,
+                        "retry_reason": decision.reason,
+                        "retry_after_seconds": decision.retry_after_seconds,
+                    },
+                )
+                save_ledger(ledger_path, ledger)
 
-                if not should_retry:
-                    return summary
-
-                assert delay is not None
-                retry_event = {
-                    "event": "retry_scheduled",
-                    "job_id": job.job_id,
-                    "attempt": attempt.number,
-                    "delay_seconds": delay,
-                    "reason": decision.reason,
-                }
-                if event_handler:
-                    event_handler(retry_event)
-                if emit_json_events:
-                    print(json.dumps(retry_event, sort_keys=True), flush=True)
-                await sleep(delay)
+            summary = {
+                "job_id": job.job_id,
+                "attempt_id": attempt.attempt_id,
+                "attempt": attempt.number,
+                "repetition": job.repetition,
+                "condition": condition.id,
+                "task_id": example.id,
+                "run_id": result.run_id,
+                "status": result.status,
+                "final_answer": result.final_answer,
+                "cost_usd": result.metrics.cost_usd,
+                "total_tokens": result.metrics.total_tokens,
+                "output_tokens": result.metrics.output_tokens,
+                "retryable": decision.retryable,
+                "retry_reason": decision.reason,
+            }
+            if event_handler:
+                event_handler(
+                    {
+                        "event": "attempt_completed",
+                        **summary,
+                        "will_retry": False,
+                    }
+                )
+            if emit_json_events:
+                print(json.dumps(summary, sort_keys=True), flush=True)
+            return summary
 
     if jobs:
-        summaries.extend(await asyncio.gather(*(run_one(job) for job in jobs)))
+        completed = await asyncio.gather(*(run_one(job) for job in jobs))
+        summaries.extend(summary for summary in completed if summary is not None)
     if event_handler:
         event_handler({"event": "benchmark_finished"})
     return {
         "dry_run": False,
         **plan,
         "scheduled_jobs": len(jobs),
+        "started_jobs": len(summaries),
+        "drained_jobs": len(jobs) - len(summaries),
         "skipped_jobs": len(ledger.jobs) - len(jobs),
+        "deferred_jobs": len(ledger.jobs) - len(scoped_ledger_jobs),
         "results": summaries,
     }
 
 
+class SampleCheckpointLLMClient:
+    """Persist successful independent samples so retries only run missing agents."""
+
+    SCHEMA_VERSION = 1
+    TRANSPORT_PARAMETERS = {"max_retries", "num_retries", "timeout"}
+
+    def __init__(
+        self,
+        wrapped: LLMClient,
+        *,
+        experiment_root: Path,
+        ledger: ExperimentLedger,
+    ) -> None:
+        self.wrapped = wrapped
+        self.experiment_root = experiment_root
+        self.checkpoint_root = experiment_root / "_checkpoints"
+        self.ledger = ledger
+        self._historical_results: dict[str, dict[str, Any] | None] = {}
+
+    async def complete(self, **kwargs: Any) -> ModelCallRecord:
+        if not self._eligible(kwargs):
+            return await self.wrapped.complete(**kwargs)
+
+        fingerprint = self._fingerprint(kwargs)
+        checkpoint_path = self._checkpoint_path(kwargs)
+        call = self._load_checkpoint(checkpoint_path, fingerprint)
+        source = "checkpoint"
+        if call is None:
+            call = self._find_historical_call(kwargs)
+            source = "prior_attempt"
+            if call is not None:
+                self._save_checkpoint(checkpoint_path, fingerprint, call)
+        if call is not None:
+            return self._reuse_call(
+                call,
+                kwargs=kwargs,
+                checkpoint_path=checkpoint_path,
+                fingerprint=fingerprint,
+                source=source,
+            )
+
+        call = await self.wrapped.complete(**kwargs)
+        if call.status == "success":
+            self._save_checkpoint(checkpoint_path, fingerprint, call)
+        return call
+
+    @staticmethod
+    def _eligible(kwargs: dict[str, Any]) -> bool:
+        metadata = kwargs.get("metadata") or {}
+        return (
+            kwargs.get("workflow") == "independent_sample"
+            and str(kwargs.get("step") or "").startswith("sample_")
+            and bool(metadata.get("benchmark_job_id"))
+        )
+
+    @staticmethod
+    def _json_value(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="json")
+        return value
+
+    def _fingerprint(self, kwargs: dict[str, Any]) -> str:
+        agent = kwargs["agent"]
+        metadata = kwargs.get("metadata") or {}
+        material = {
+            "job_id": metadata["benchmark_job_id"],
+            "condition_id": metadata.get("condition_id"),
+            "task_id": kwargs["task_id"],
+            "workflow": kwargs["workflow"],
+            "step": kwargs["step"],
+            "agent": agent.model_dump(mode="json"),
+            "messages": [
+                self._json_value(message) for message in kwargs["messages"]
+            ],
+            "prompt_references": [
+                self._json_value(reference)
+                for reference in kwargs.get("prompt_references") or []
+            ],
+        }
+        encoded = json.dumps(
+            material,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return sha256(encoded).hexdigest()
+
+    def _checkpoint_path(self, kwargs: dict[str, Any]) -> Path:
+        metadata = kwargs.get("metadata") or {}
+        job_id = str(metadata["benchmark_job_id"])
+        key = sha256(
+            f"{kwargs['step']}:{kwargs['agent'].id}".encode("utf-8")
+        ).hexdigest()[:16]
+        return self.checkpoint_root / job_id / f"{key}.json"
+
+    @staticmethod
+    def _load_json(path: Path) -> dict[str, Any] | None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _load_checkpoint(
+        self,
+        path: Path,
+        fingerprint: str,
+    ) -> ModelCallRecord | None:
+        data = self._load_json(path)
+        if (
+            data is None
+            or data.get("schema_version") != self.SCHEMA_VERSION
+            or data.get("request_fingerprint") != fingerprint
+            or not isinstance(data.get("call"), dict)
+        ):
+            return None
+        try:
+            call = ModelCallRecord.model_validate(data["call"])
+        except ValueError:
+            return None
+        return call if call.status == "success" else None
+
+    def _save_checkpoint(
+        self,
+        path: Path,
+        fingerprint: str,
+        call: ModelCallRecord,
+    ) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": self.SCHEMA_VERSION,
+            "request_fingerprint": fingerprint,
+            "step": call.step,
+            "agent_id": call.agent_id,
+            "call": call.model_dump(mode="json"),
+        }
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _find_historical_call(
+        self,
+        kwargs: dict[str, Any],
+    ) -> ModelCallRecord | None:
+        metadata = kwargs.get("metadata") or {}
+        record = self.ledger.jobs.get(str(metadata["benchmark_job_id"]))
+        if record is None:
+            return None
+        for attempt in reversed(record.attempts):
+            if not attempt.run_id:
+                continue
+            result = self._historical_result(attempt.run_id)
+            if result is None or not self._result_matches(result, kwargs):
+                continue
+            for call_data in reversed(result.get("calls") or []):
+                if not isinstance(call_data, dict):
+                    continue
+                try:
+                    call = ModelCallRecord.model_validate(call_data)
+                except ValueError:
+                    continue
+                if self._call_matches(call, kwargs):
+                    return call
+        return None
+
+    def _historical_result(self, run_id: str) -> dict[str, Any] | None:
+        if run_id not in self._historical_results:
+            self._historical_results[run_id] = self._load_json(
+                self.experiment_root / run_id / "result.json"
+            )
+        return self._historical_results[run_id]
+
+    @staticmethod
+    def _result_matches(result: dict[str, Any], kwargs: dict[str, Any]) -> bool:
+        workflow = result.get("workflow") or {}
+        config = workflow.get("config") or {}
+        metadata = kwargs.get("metadata") or {}
+        return (
+            result.get("task_id") == kwargs["task_id"]
+            and workflow.get("name") == kwargs["workflow"]
+            and config.get("condition_id") == metadata.get("condition_id")
+        )
+
+    def _call_matches(
+        self,
+        call: ModelCallRecord,
+        kwargs: dict[str, Any],
+    ) -> bool:
+        agent = kwargs["agent"]
+        expected_parameters = agent.completion_parameters()
+        stored_parameters = {
+            key: value
+            for key, value in call.request_parameters.items()
+            if key not in self.TRANSPORT_PARAMETERS
+        }
+        return (
+            call.status == "success"
+            and call.step == kwargs["step"]
+            and call.agent_id == agent.id
+            and call.requested_model == agent.model
+            and stored_parameters == expected_parameters
+            and [message.model_dump(mode="json") for message in call.messages]
+            == [
+                self._json_value(message)
+                for message in kwargs["messages"]
+            ]
+            and [
+                reference.model_dump(mode="json")
+                for reference in call.prompt_references
+            ]
+            == [
+                self._json_value(reference)
+                for reference in kwargs.get("prompt_references") or []
+            ]
+        )
+
+    @staticmethod
+    def _reuse_call(
+        call: ModelCallRecord,
+        *,
+        kwargs: dict[str, Any],
+        checkpoint_path: Path,
+        fingerprint: str,
+        source: str,
+    ) -> ModelCallRecord:
+        timestamp = utc_now()
+        metadata = {
+            **call.metadata,
+            **(kwargs.get("metadata") or {}),
+            "checkpoint_reused": True,
+            "checkpoint_source": source,
+            "checkpoint_path": str(checkpoint_path),
+            "checkpoint_request_fingerprint": fingerprint,
+            "checkpoint_source_call_id": call.id,
+            "checkpoint_source_run_id": call.run_id,
+        }
+        return call.model_copy(
+            deep=True,
+            update={
+                "id": str(uuid4()),
+                "sequence": kwargs["sequence"],
+                "run_id": kwargs["run_id"],
+                "started_at": timestamp,
+                "ended_at": timestamp,
+                "latency_ms": 0.0,
+                "metadata": metadata,
+            },
+        )
+
+
 class RateLimitedLLMClient:
+    ESTIMATED_TOKENS_BY_EFFORT = {
+        "none": 5_000,
+        "low": 8_000,
+        "medium": 40_000,
+        "high": 55_000,
+        "xhigh": 65_000,
+    }
+
     def __init__(
         self,
         wrapped: LLMClient,
         *,
         limiter: AsyncRateLimiter,
         estimated_tokens: int,
+        retry_policy: RetryPolicy | None = None,
         event_handler: Callable[[dict[str, Any]], None] | None = None,
+        random_source=random.random,
     ) -> None:
         self.wrapped = wrapped
         self.limiter = limiter
         self.estimated_tokens = estimated_tokens
+        self.retry_policy = retry_policy or RetryPolicy(max_attempts=1)
         self.event_handler = event_handler
+        self.random_source = random_source
 
     async def complete(self, **kwargs: Any) -> ModelCallRecord:
-        lease = await self.limiter.acquire(estimated_tokens=self.estimated_tokens)
-        try:
-            call = await self.wrapped.complete(**kwargs)
-        except LLMCallError as exc:
-            exc.record.metadata = {
-                **exc.record.metadata,
-                "rate_limit": asdict(lease.metadata),
-            }
-            raise
-        else:
-            call.metadata = {
-                **call.metadata,
-                "rate_limit": asdict(lease.metadata),
-            }
-            await lease.reconcile_tokens(call.usage.total_tokens or 0)
+        agent = kwargs["agent"]
+        metadata = kwargs.get("metadata") or {}
+        progress_fields = {
+            "job_id": metadata.get("benchmark_job_id"),
+            "condition": metadata.get("condition_id"),
+            "run_id": kwargs["run_id"],
+            "sequence": kwargs["sequence"],
+            "step": kwargs["step"],
+            "agent_id": agent.id,
+            "model": agent.model,
+        }
+        estimated_tokens = max(
+            self.estimated_tokens,
+            self.ESTIMATED_TOKENS_BY_EFFORT.get(
+                agent.reasoning_effort or "",
+                self.estimated_tokens,
+            ),
+        )
+        retries: list[dict[str, Any]] = []
+        for attempt_number in range(1, self.retry_policy.max_attempts + 1):
+            lease = await self.limiter.acquire(estimated_tokens=estimated_tokens)
             if self.event_handler:
                 self.event_handler(
                     {
-                        "event": "model_call_completed",
-                        "model": call.response_model or call.requested_model,
-                        "output_tokens": call.usage.output_tokens or 0,
-                        "latency_ms": call.latency_ms,
+                        "event": "model_call_started",
+                        **progress_fields,
+                        "request_attempt": attempt_number,
                     }
                 )
-            return call
-        finally:
-            lease.release()
+            try:
+                call = await self.wrapped.complete(**kwargs)
+            except LLMCallError as exc:
+                decision = classify_retry(exc)
+                reported_tpm_limit = (
+                    provider_tpm_limit(exc) if decision.status_code == 429 else None
+                )
+                effective_tpm_limit = None
+                if reported_tpm_limit is not None:
+                    effective_tpm_limit = await self.limiter.cap_tokens_per_minute(
+                        reported_tpm_limit
+                    )
+                retry_summary = {
+                    "attempt": attempt_number,
+                    "reason": decision.reason,
+                    "status_code": decision.status_code,
+                    "retry_after_seconds": decision.retry_after_seconds,
+                    "error_type": (
+                        exc.record.error.type
+                        if exc.record.error
+                        else type(exc).__name__
+                    ),
+                    "error_message": (
+                        exc.record.error.message if exc.record.error else str(exc)
+                    ),
+                    "latency_ms": exc.record.latency_ms,
+                    "rate_limit": asdict(lease.metadata),
+                    "provider_tpm_limit": reported_tpm_limit,
+                    "effective_tpm_limit": effective_tpm_limit,
+                }
+                retries.append(retry_summary)
+                exc.record.metadata = {
+                    **exc.record.metadata,
+                    "rate_limit": asdict(lease.metadata),
+                    "request_attempt": attempt_number,
+                    "request_retries": retries,
+                }
+                should_retry = (
+                    decision.status_code == 429
+                    and attempt_number < self.retry_policy.max_attempts
+                )
+                if self.event_handler:
+                    self.event_handler(
+                        {
+                            "event": "model_call_failed",
+                            **progress_fields,
+                            "request_attempt": attempt_number,
+                            "latency_ms": exc.record.latency_ms,
+                            "reason": decision.reason,
+                            "status_code": decision.status_code,
+                            "will_retry": should_retry,
+                        }
+                    )
+                if not should_retry:
+                    raise
+                delay = self.retry_policy.delay(
+                    attempt_number,
+                    retry_after_seconds=decision.retry_after_seconds,
+                    random_value=self.random_source(),
+                )
+                await self.limiter.impose_cooldown(max(1.0, delay))
+                if self.event_handler:
+                    self.event_handler(
+                        {
+                            "event": "model_call_retry_scheduled",
+                            "model": agent.model,
+                            "attempt": attempt_number,
+                            "delay_seconds": max(1.0, delay),
+                            "reason": decision.reason,
+                            "status_code": decision.status_code,
+                            "provider_tpm_limit": reported_tpm_limit,
+                            "effective_tpm_limit": effective_tpm_limit,
+                        }
+                    )
+            else:
+                checkpoint_reused = bool(call.metadata.get("checkpoint_reused"))
+                call.metadata = {
+                    **call.metadata,
+                    "rate_limit": asdict(lease.metadata),
+                    "request_attempt": attempt_number,
+                    "request_retries": retries,
+                }
+                provider_total_tokens = (
+                    0 if checkpoint_reused else call.usage.total_tokens or 0
+                )
+                provider_output_tokens = (
+                    0 if checkpoint_reused else call.usage.output_tokens or 0
+                )
+                await lease.reconcile_tokens(provider_total_tokens)
+                if self.event_handler:
+                    self.event_handler(
+                        {
+                            "event": "model_call_completed",
+                            **progress_fields,
+                            "model": call.response_model or call.requested_model,
+                            "total_tokens": provider_total_tokens,
+                            "output_tokens": provider_output_tokens,
+                            "recorded_total_tokens": call.usage.total_tokens or 0,
+                            "checkpoint_reused": checkpoint_reused,
+                            "latency_ms": call.latency_ms,
+                            "request_attempt": attempt_number,
+                        }
+                    )
+                return call
+            finally:
+                lease.release()
+        raise AssertionError("unreachable")
 
 
 def _jobs_to_run(
     ledger: ExperimentLedger,
     *,
     max_attempts: int,
+    allowed_condition_ids: set[str] | None = None,
 ) -> list[JobSpec]:
     jobs = []
     for record in ledger.jobs.values():
-        if record.attempt_count >= max_attempts:
+        if (
+            allowed_condition_ids is not None
+            and record.spec.condition_id not in allowed_condition_ids
+        ):
+            continue
+        attempts_toward_limit = sum(
+            not (attempt.error or "").startswith("retryable:cancelled")
+            for attempt in record.attempts
+        )
+        if attempts_toward_limit >= max_attempts:
             continue
         if record.state in {JobState.PENDING, JobState.RUNNING}:
             jobs.append(record.spec)
-        elif (
-            record.state == JobState.FAILED
-            and (record.latest_error or "").startswith("retryable:")
+        elif record.state == JobState.FAILED and (record.latest_error or "").startswith(
+            "retryable:"
         ):
             jobs.append(record.spec)
     return jobs
@@ -558,7 +1038,11 @@ def _workflow(
         return LabeledWorkflow(SoloWorkflow(base_agent), condition.id)
     if condition.workflow == "self-critic":
         return LabeledWorkflow(
-            SelfCriticWorkflow(base_agent, rounds=condition.rounds, revision_prompt=SELF_CRITIC_REVISION_PROMPT),
+            SelfCriticWorkflow(
+                base_agent,
+                rounds=condition.rounds,
+                revision_prompt=SELF_CRITIC_REVISION_PROMPT,
+            ),
             condition.id,
         )
 
@@ -596,7 +1080,8 @@ def _workflow(
             system_prompt=JUDGE_SYSTEM_PROMPT.template,
             system_prompt_name=JUDGE_SYSTEM_PROMPT.name,
             system_prompt_version=JUDGE_SYSTEM_PROMPT.version,
-            reasoning_effort=condition.judge_reasoning_effort or condition.reasoning_effort,
+            reasoning_effort=condition.judge_reasoning_effort
+            or condition.reasoning_effort,
             service_tier=condition.judge_service_tier or condition.service_tier,  # type: ignore[arg-type]
             parameters=parameters,
         )
@@ -639,7 +1124,11 @@ def _workflow(
             condition.id,
         )
     if condition.workflow in {"debate", "adversarial-debate"}:
-        workflow_type = AdversarialDebateWorkflow if condition.workflow == "adversarial-debate" else DebateWorkflow
+        workflow_type = (
+            AdversarialDebateWorkflow
+            if condition.workflow == "adversarial-debate"
+            else DebateWorkflow
+        )
         return LabeledWorkflow(
             workflow_type(
                 agents,

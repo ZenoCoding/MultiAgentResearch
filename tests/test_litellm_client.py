@@ -69,6 +69,7 @@ async def test_litellm_response_is_normalized(monkeypatch):
     assert record.request_parameters == {
         "num_retries": 0,
         "max_retries": 0,
+        "timeout": 300.0,
     }
     assert record.provider_metadata["response_cost"] == pytest.approx(0.0123)
 
@@ -148,6 +149,7 @@ async def test_reasoning_effort_is_sent_as_first_class_agent_setting(monkeypatch
         "reasoning_effort": "high",
         "num_retries": 0,
         "max_retries": 0,
+        "timeout": 900.0,
     }
 
 
@@ -247,6 +249,7 @@ async def test_litellm_failure_records_request_and_provider_details(monkeypatch)
         "temperature": 0.2,
         "num_retries": 0,
         "max_retries": 0,
+        "timeout": 300.0,
     }
     assert record.error.details == {
         "status_code": 429,

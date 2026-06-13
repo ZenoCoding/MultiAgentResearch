@@ -59,9 +59,13 @@ uv run python -m extensions.benchmark_tools.cli run \
 ```
 
 Remove `--dry-run` to execute. Each logical
-`(condition, task, repetition)` job has a stable ID. Provider failures create
-separate attempts, and successful or inconclusive jobs are skipped when the
-same command resumes. Experiment state is saved atomically under:
+`(condition, task, repetition)` job has a stable ID. A 429 retries only the
+failed model request inside the active workflow; completed workflow calls are
+not repeated. Timeouts fail the job without an automatic retry. Each scheduled
+job runs at most once per invocation, and successful jobs are skipped when the
+same command resumes. `--max-attempts` is the persisted attempt ceiling across
+explicit resumes, while `--request-max-attempts` controls 429 recovery inside a
+single workflow call. Experiment state is saved atomically under:
 
 ```text
 results/<experiment-id>/experiment-manifest.json
@@ -113,6 +117,42 @@ The current matrix is 1,400 logical jobs and at least 12,126 workflow model
 calls. The estimate excludes conditional tie-break calls and the separate HLE
 grading pass.
 
+To resume the non-debate portion on the 2M TPM provider tier, leave headroom
+for token-estimation variance and defer grading until this phase completes:
+
+```bash
+uv run python -m extensions.benchmark_tools.cli experiment \
+  --config data/hle-representative-40-experiment.json \
+  --model openai/gpt-5.4-nano \
+  --concurrency 32 \
+  --max-in-flight-requests 48 \
+  --requests-per-minute 1000 \
+  --tokens-per-minute 1500000 \
+  --max-attempts 4 \
+  --request-max-attempts 2 \
+  --exclude-workflow debate \
+  --exclude-reasoning-effort high \
+  --exclude-reasoning-effort xhigh \
+  --skip-preflight \
+  --skip-grading
+```
+
+Changing these operational limits is resume-compatible and does not rerun
+successful jobs. Workflow exclusions apply only to the current invocation: the
+full condition matrix remains in the manifest and deferred jobs remain pending
+for a later resume.
+
+On macOS or Linux, request a graceful drain without cancelling active model
+calls:
+
+```bash
+kill -USR1 <benchmark-pid>
+```
+
+The process finishes calls already admitted by the concurrency semaphore,
+leaves queued jobs pending, saves the ledger, and exits normally. Resume with
+the same experiment ID and new operational limits.
+
 ## First paid smoke run
 
 `benchmarks/hle-smoke-5` contains five fixed tasks from the representative set:
@@ -151,8 +191,10 @@ Remove `--dry-run` only after preflight passes. The same command resumes the
 experiment from its atomic ledger if interrupted.
 
 For a live terminal summary with completion percentage, job status counts,
-retries, session spend, tokens, instantaneous output tokens per second (TPS)
-for the latest completed model call, elapsed time, and ETA, add `--progress`:
+retries, session spend, rolling tokens per minute (TPM), rolling successful
+requests per minute (RPM), aggregate output tokens per second (TPS), elapsed
+time, ETA, and an animated comet moving through unfinished work, add
+`--progress`:
 
 ```bash
 uv run python -m extensions.benchmark_tools.cli run \

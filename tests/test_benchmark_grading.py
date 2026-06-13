@@ -63,7 +63,7 @@ async def test_semantic_hle_grading_is_resumable_and_drives_analysis(
         output_dir=results,
         conditions=[Condition(id="solo", workflow="solo")],
         llm=FakeLLMClient(
-            ["Reasoning\n<final_answer>0.5</final_answer>"]
+            ["Reasoning\n<final_answer>0.5</final_answer>\n"]
         ),
         max_attempts=1,
     )

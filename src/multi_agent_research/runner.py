@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from time import monotonic
 import traceback
+from typing import Any
 from uuid import uuid4
 
 from multi_agent_research.aggregation import AggregationInconclusive
@@ -39,6 +40,7 @@ class ExperimentRunner:
         task: TaskInput,
         workflow: Workflow,
         experiment_id: str,
+        call_metadata: dict[str, Any] | None = None,
     ) -> RunResult:
         run_id = str(uuid4())
         request = RunRequest(
@@ -53,6 +55,7 @@ class ExperimentRunner:
             task=task,
             workflow_name=workflow.name,
             llm=self.llm,
+            call_metadata=call_metadata,
         )
         started_at = utc_now()
         started_clock = monotonic()

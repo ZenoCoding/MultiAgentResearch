@@ -1029,7 +1029,7 @@ def _score(
             "reasoning": "",
             "confidence": None,
         }
-    record = semantic_grades.lookup(task_id, response)
+    record = semantic_grades.lookup(task_id, response.strip())
     if record is None:
         return {
             "correct": None,

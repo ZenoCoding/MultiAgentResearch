@@ -301,3 +301,125 @@ tr:hover td {
   color: var(--text-primary);
   font-weight: 600;
 }
+
+/* Deepswe-style Table Styling */
+.results-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 1024px) {
+  .results-grid {
+    grid-template-columns: 1.35fr 0.65fr;
+  }
+}
+
+.deepswe-container {
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.deepswe-header {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .deepswe-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+}
+
+.deepswe-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 0;
+}
+
+.deepswe-row:last-child {
+  border-bottom: none;
+}
+
+.deepswe-model-col {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.deepswe-bar-col {
+  width: 100%;
+}
+
+.deepswe-mobile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.deepswe-desktop-stat {
+  display: none;
+}
+
+.deepswe-axis-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+@media (min-width: 640px) {
+  .deepswe-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+  
+  .deepswe-model-col {
+    width: 210px;
+    flex-shrink: 0;
+    justify-content: flex-start;
+  }
+  
+  .deepswe-bar-col {
+    flex: 1;
+  }
+  
+  .deepswe-mobile-stats {
+    display: none;
+  }
+  
+  .deepswe-desktop-stat {
+    display: block;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  
+  .deepswe-w-pass { width: 68px; flex-shrink: 0; }
+  .deepswe-w-cost { width: 64px; flex-shrink: 0; }
+  .deepswe-w-time { width: 56px; flex-shrink: 0; }
+  .deepswe-w-tok  { width: 52px; flex-shrink: 0; }
+}
+
+@media (min-width: 640px) {
+  .sm-hidden-only {
+    display: none !important;
+  }
+}
+

@@ -42,14 +42,16 @@ class ExecutionPolicy:
     retry_base_delay_seconds: float = 1.0
     retry_max_delay_seconds: float = 30.0
     retry_jitter_ratio: float = 0.2
+    request_max_attempts: int = 3
+    request_retry_base_delay_seconds: float = 1.0
+    request_retry_max_delay_seconds: float = 60.0
+    request_retry_jitter_ratio: float = 0.2
 
     def __post_init__(self) -> None:
         if self.concurrency < 1:
             raise ExperimentValidationError("concurrency must be at least 1")
         if self.max_in_flight_requests < 1:
-            raise ExperimentValidationError(
-                "max_in_flight_requests must be at least 1"
-            )
+            raise ExperimentValidationError("max_in_flight_requests must be at least 1")
         if self.requests_per_minute is not None and self.requests_per_minute <= 0:
             raise ExperimentValidationError("requests_per_minute must be positive")
         if self.tokens_per_minute is not None and self.tokens_per_minute <= 0:
@@ -67,11 +69,22 @@ class ExecutionPolicy:
             )
         if self.max_attempts < 1:
             raise ExperimentValidationError("max_attempts must be at least 1")
+        if self.request_max_attempts < 1:
+            raise ExperimentValidationError("request_max_attempts must be at least 1")
         if self.retry_base_delay_seconds < 0 or self.retry_max_delay_seconds < 0:
             raise ExperimentValidationError("retry delays cannot be negative")
+        if (
+            self.request_retry_base_delay_seconds < 0
+            or self.request_retry_max_delay_seconds < 0
+        ):
+            raise ExperimentValidationError("request retry delays cannot be negative")
         if not 0 <= self.retry_jitter_ratio <= 1:
             raise ExperimentValidationError(
                 "retry_jitter_ratio must be between 0 and 1"
+            )
+        if not 0 <= self.request_retry_jitter_ratio <= 1:
+            raise ExperimentValidationError(
+                "request_retry_jitter_ratio must be between 0 and 1"
             )
 
 
@@ -168,7 +181,34 @@ class ExperimentManifest:
             "generation_settings": self.generation_settings,
             "system_settings": self.system_settings,
             "repetitions": self.repetitions,
-            "policy": asdict(self.policy),
+        }
+        return _digest(material)
+
+    @property
+    def legacy_compatibility_fingerprint(self) -> str:
+        legacy_policy = {
+            "concurrency": self.policy.concurrency,
+            "max_in_flight_requests": self.policy.max_in_flight_requests,
+            "requests_per_minute": self.policy.requests_per_minute,
+            "tokens_per_minute": self.policy.tokens_per_minute,
+            "estimated_tokens_per_request": self.policy.estimated_tokens_per_request,
+            "max_attempts": self.policy.max_attempts,
+            "retry_base_delay_seconds": self.policy.retry_base_delay_seconds,
+            "retry_max_delay_seconds": self.policy.retry_max_delay_seconds,
+            "retry_jitter_ratio": self.policy.retry_jitter_ratio,
+        }
+        material = {
+            "schema_version": self.schema_version,
+            "experiment_id": self.experiment_id,
+            "task_set_sha256": self.task_set_sha256,
+            "task_count": self.task_count,
+            "conditions": self.conditions,
+            "model": self.model,
+            "judge_model": self.judge_model,
+            "generation_settings": self.generation_settings,
+            "system_settings": self.system_settings,
+            "repetitions": self.repetitions,
+            "policy": legacy_policy,
         }
         return _digest(material)
 
@@ -308,7 +348,11 @@ class ExperimentLedger:
     def assert_manifest(self, manifest: ExperimentManifest) -> None:
         if (
             self.experiment_id != manifest.experiment_id
-            or self.manifest_fingerprint != manifest.compatibility_fingerprint
+            or self.manifest_fingerprint
+            not in {
+                manifest.compatibility_fingerprint,
+                manifest.legacy_compatibility_fingerprint,
+            }
         ):
             raise ManifestMismatchError("ledger does not match experiment manifest")
 
@@ -378,6 +422,23 @@ class ExperimentLedger:
         job.updated_at = timestamp
         self.updated_at = timestamp
         return attempt
+
+    def requeue_cancelled_jobs(self) -> int:
+        """Return operator-cancelled jobs to pending without erasing audit history."""
+
+        requeued = 0
+        timestamp = _utc_now()
+        for job in self.jobs.values():
+            if job.state == JobState.FAILED and (job.latest_error or "").startswith(
+                "retryable:cancelled"
+            ):
+                job.state = JobState.PENDING
+                job.selected_attempt_id = None
+                job.updated_at = timestamp
+                requeued += 1
+        if requeued:
+            self.updated_at = timestamp
+        return requeued
 
 
 def job_id(experiment_id: str, condition_id: str, task_id: str, repetition: int) -> str:

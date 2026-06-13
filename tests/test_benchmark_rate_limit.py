@@ -9,6 +9,7 @@ from extensions.benchmark_tools.rate_limit import (
     AsyncRateLimiter,
     RetryPolicy,
     classify_retry,
+    provider_tpm_limit,
     retry_call,
 )
 
@@ -116,14 +117,21 @@ def test_retry_classification_rejects_contract_and_programming_errors(error):
 
 def test_retry_classification_reads_normalized_call_record_details():
     error = RuntimeError("normalized provider failure")
-    error.record = SimpleNamespace(
-        error=SimpleNamespace(details={"status_code": 429})
-    )
+    error.record = SimpleNamespace(error=SimpleNamespace(details={"status_code": 429}))
 
     decision = classify_retry(error)
 
     assert decision.retryable
     assert decision.reason == "http_429"
+
+
+def test_retry_after_is_parsed_from_provider_message():
+    error = RuntimeError("Rate limited. Please try again in 360ms.")
+    error.status_code = 429
+
+    decision = classify_retry(error)
+
+    assert decision.retry_after_seconds == pytest.approx(0.36)
 
 
 @pytest.mark.asyncio
@@ -203,6 +211,39 @@ async def test_cancelled_limiter_wait_does_not_leak_permit():
     first.release()
     lease = await asyncio.wait_for(limiter.acquire(), timeout=0.1)
     lease.release()
+
+
+@pytest.mark.asyncio
+async def test_global_cooldown_delays_future_acquisitions():
+    fake = FakeTime()
+    limiter = AsyncRateLimiter(
+        max_in_flight=1,
+        clock=fake.clock,
+        sleep=fake.sleep,
+    )
+
+    await limiter.impose_cooldown(2.5)
+    lease = await limiter.acquire()
+    lease.release()
+
+    assert fake.sleeps == [2.5]
+
+
+@pytest.mark.asyncio
+async def test_provider_tpm_cap_only_reduces_the_configured_limit():
+    limiter = AsyncRateLimiter(max_in_flight=1, tokens_per_minute=1_500_000)
+
+    assert await limiter.cap_tokens_per_minute(200_000) == 180_000
+    assert await limiter.cap_tokens_per_minute(2_000_000) == 180_000
+
+
+def test_provider_tpm_limit_is_parsed_from_rate_limit_message():
+    error = RuntimeError(
+        "Rate limit reached on tokens per min (TPM): "
+        "Limit 200,000, Used 200000."
+    )
+
+    assert provider_tpm_limit(error) == 200_000
 
 
 @pytest.mark.asyncio

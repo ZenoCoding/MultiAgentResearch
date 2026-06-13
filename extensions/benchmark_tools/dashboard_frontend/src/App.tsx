@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 // Interfaces for MART dashboard
 interface ExperimentSummary {
@@ -184,29 +184,192 @@ interface RunDetailTrace {
   inconclusive: any;
   provenance: any;
 }
-const getReasoningEffort = (id: string) => {
-  // Look for -e-effort
-  let match = id.match(/-e-([a-z0-9]+)/);
-  if (match) return match[1];
-  
-  // Look for supervisor-se-effort-we-effort
-  match = id.match(/-se-([a-z0-9]+)/);
-  if (match) {
-    const sup = match[1];
-    const workerMatch = id.match(/-we-([a-z0-9]+)/);
-    if (workerMatch) {
-      return `${sup} (sup) / ${workerMatch[1]} (worker)`;
-    }
-    return sup;
-  }
-  
-  return "default";
+type ConditionIdentity = {
+  workflow: string;
+  effort: string | null;
+  workerEffort: string | null;
+  supervisorEffort: string | null;
+  agents: number | null;
+  rounds: number | null;
 };
 
-const getGroupName = (c: { workflow?: string; condition: string }) => {
-  const wf = c.workflow || "unknown";
-  const effort = getReasoningEffort(c.condition);
-  return `${wf} (${effort})`;
+const WORKFLOW_ORDER = ['solo', 'sample', 'self-critic', 'debate', 'supervisor'];
+
+const normalizeWorkflow = (workflow?: string, condition = '') => {
+  const normalized = (workflow || '').replace(/_/g, '-').toLowerCase();
+  if (normalized === 'independent-sample' || normalized === 'sampling') return 'sample';
+  if (normalized === 'supervisor-worker') return 'supervisor';
+  if (normalized && normalized !== 'unknown') return normalized;
+  if (condition.startsWith('supervisor')) return 'supervisor';
+  if (condition.startsWith('self-critic')) return 'self-critic';
+  if (condition.startsWith('sample')) return 'sample';
+  if (condition.startsWith('debate')) return 'debate';
+  if (condition.startsWith('solo')) return 'solo';
+  return 'unknown';
+};
+
+const getConditionIdentity = (condition: string, workflow?: string): ConditionIdentity => {
+  const normalizedWorkflow = normalizeWorkflow(workflow, condition);
+  const effortMatch = condition.match(/-e-([a-z0-9]+)/);
+  const workerMatch = condition.match(/-(?:w|we)-([a-z0-9]+)/);
+  const supervisorMatch = condition.match(/-(?:s|se)-([a-z0-9]+)/);
+  const agentsMatch = condition.match(/-a(\d+)/);
+  const roundsMatch = condition.match(/-r(\d+)/);
+
+  return {
+    workflow: normalizedWorkflow,
+    effort: effortMatch?.[1] || null,
+    workerEffort: workerMatch?.[1] || null,
+    supervisorEffort: supervisorMatch?.[1] || null,
+    agents: agentsMatch ? Number(agentsMatch[1]) : null,
+    rounds: roundsMatch ? Number(roundsMatch[1]) : null,
+  };
+};
+
+const formatWorkflowName = (workflow: string) => {
+  if (workflow === 'sample') return 'Sampling';
+  if (workflow === 'self-critic') return 'Self-critic';
+  if (workflow === 'supervisor') return 'Supervisor';
+  if (workflow === 'debate') return 'Debate';
+  if (workflow === 'solo') return 'Solo';
+  return workflow.replace(/-/g, ' ');
+};
+
+// Filters operate on stable workflow families. Lines use narrower comparable
+// series so only one scale variable changes along a connected path.
+const getGroupName = (c: { workflow?: string; condition: string }) =>
+  getConditionIdentity(c.condition, c.workflow).workflow;
+
+const getSeriesKey = (c: { workflow?: string; condition: string }) => {
+  const identity = getConditionIdentity(c.condition, c.workflow);
+  if (identity.workflow === 'solo') return 'solo|effort';
+  if (identity.workflow === 'sample' || identity.workflow === 'self-critic') {
+    return `${identity.workflow}|effort:${identity.effort || 'default'}`;
+  }
+  if (identity.workflow === 'debate') {
+    return `debate|effort:${identity.effort || 'default'}|rounds:${identity.rounds ?? 'default'}`;
+  }
+  if (identity.workflow === 'supervisor') {
+    return `supervisor|worker:${identity.workerEffort || 'default'}|supervisor:${identity.supervisorEffort || 'default'}`;
+  }
+  return `${identity.workflow}|default`;
+};
+
+const formatConditionConfig = (c: { workflow?: string; condition: string }) => {
+  const identity = getConditionIdentity(c.condition, c.workflow);
+  const effort = identity.effort || 'default';
+  if (identity.workflow === 'solo') return `${effort} effort`;
+  if (identity.workflow === 'sample') {
+    return `${effort} effort · ${identity.agents ?? '?'} agents`;
+  }
+  if (identity.workflow === 'self-critic') {
+    return `${effort} effort · ${identity.rounds ?? '?'} revision rounds`;
+  }
+  if (identity.workflow === 'debate') {
+    return `${effort} effort · ${identity.agents ?? '?'} agents · ${identity.rounds ?? '?'} rounds`;
+  }
+  if (identity.workflow === 'supervisor') {
+    return `worker ${identity.workerEffort || 'default'} · supervisor ${identity.supervisorEffort || 'default'} · max ${identity.rounds ?? '?'} rounds`;
+  }
+  return c.condition;
+};
+
+const formatConditionTag = (c: { workflow?: string; condition: string }) => {
+  const identity = getConditionIdentity(c.condition, c.workflow);
+  const workflow = formatWorkflowName(identity.workflow);
+  if (identity.workflow === 'solo') return `${workflow} · ${identity.effort || 'default'}`;
+  if (identity.workflow === 'sample') {
+    return `${workflow} · ${identity.effort || 'default'} · a${identity.agents ?? '?'}`;
+  }
+  if (identity.workflow === 'self-critic') {
+    return `${workflow} · ${identity.effort || 'default'} · r${identity.rounds ?? '?'}`;
+  }
+  if (identity.workflow === 'debate') {
+    return `${workflow} · ${identity.effort || 'default'} · a${identity.agents ?? '?'}/r${identity.rounds ?? '?'}`;
+  }
+  if (identity.workflow === 'supervisor') {
+    return `${workflow} · W ${identity.workerEffort || '?'} / S ${identity.supervisorEffort || '?'} · r${identity.rounds ?? '?'}`;
+  }
+  return c.condition;
+};
+
+const parseConditionName = (id: string) => {
+  const identity = getConditionIdentity(id);
+  return {
+    name: identity.workflow,
+    effort: formatConditionConfig({ condition: id, workflow: identity.workflow }),
+  };
+};
+
+const getWorkflowIcon = (name: string) => {
+  const n = name.toLowerCase();
+  if (n.includes('solo')) {
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <rect x="3" y="11" width="18" height="10" rx="2" />
+        <circle cx="12" cy="5" r="1.5" />
+        <path d="M12 6.5v4.5M8 15.5h.01M16 15.5h.01" />
+      </svg>
+    );
+  }
+  if (n.includes('debate')) {
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    );
+  }
+  if (n.includes('critic')) {
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+        <path d="M9 12l2 2 4-4" />
+      </svg>
+    );
+  }
+  if (n.includes('supervisor')) {
+    return (
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
+  );
+};
+
+const getWorkflowColor = (name: string) => {
+  const n = name.toLowerCase();
+  if (n.includes('solo')) return '#3b82f6'; // Blue
+  if (n.includes('debate')) return '#8b5cf6'; // Purple
+  if (n.includes('critic')) return '#10b981'; // Emerald Green
+  if (n.includes('supervisor')) return '#f97316'; // Orange
+  return '#6b7280'; // Gray
+};
+
+const formatAvgCost = (val: number) => {
+  if (val === 0) return '$0.00';
+  if (val >= 1.0) return `$${val.toFixed(2)}`;
+  if (val >= 0.01) return `$${val.toFixed(3)}`;
+  return `$${val.toFixed(4)}`;
+};
+
+const formatAvgTime = (ms: number) => {
+  if (ms <= 0) return '0s';
+  const sec = ms / 1000;
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const min = sec / 60;
+  return `${Math.round(min)}m`;
+};
+
+const formatAvgTokens = (val: number) => {
+  if (val <= 0) return '0';
+  if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
+  return Math.round(val).toString();
 };
 
 export default function App() {
@@ -228,6 +391,11 @@ export default function App() {
   const [hoveredCondition, setHoveredCondition] = useState<string | null>(null);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Deepswe dashboard states
+  const [effortFilter, setEffortFilter] = useState<'best' | 'all'>('best');
+  const [selectedWorkflows, setSelectedWorkflows] = useState<string[]>([]);
+  const [showWorkflowDropdown, setShowWorkflowDropdown] = useState(false);
 
   // Search/Filter for runs table
   const [runSearchQuery, setRunSearchQuery] = useState('');
@@ -292,8 +460,20 @@ export default function App() {
         const solo = conditions.find((c: string) => c.toLowerCase().includes('solo'));
         setBaselineCondition(solo || conditions[0]);
         if (!isPoll) {
-          const wfs = Array.from(new Set(data.summary.conditions.map((c: any) => getGroupName(c)))) as string[];
+          const wfs = (Array.from(new Set(data.summary.conditions.map((c: any) => getGroupName(c)))) as string[])
+            .sort((a, b) => {
+              const aIndex = WORKFLOW_ORDER.indexOf(a);
+              const bIndex = WORKFLOW_ORDER.indexOf(b);
+              return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex);
+            });
           setSelectedGroups(wfs);
+
+          const uniqueWfs = Array.from(
+            new Set(
+              data.summary.conditions.map((c: any) => parseConditionName(c.condition).name)
+            )
+          ) as string[];
+          setSelectedWorkflows(uniqueWfs);
         }
       }
     } catch (err: any) {
@@ -451,6 +631,39 @@ export default function App() {
     };
   };
 
+  const allWorkflows = useMemo(() => {
+    if (!details) return [];
+    return Array.from(
+      new Set(
+        details.summary.conditions.map((c: any) => parseConditionName(c.condition).name)
+      )
+    ) as string[];
+  }, [details]);
+
+  const displayedAccuracies = useMemo(() => {
+    const allData = getFilteredAccuracies();
+    // Filter by selected workflows
+    const filteredByWorkflow = allData.filter(c => {
+      const parsed = parseConditionName(c.condition);
+      if (selectedWorkflows.length === 0) return true;
+      return selectedWorkflows.includes(parsed.name);
+    });
+
+    if (effortFilter === 'best') {
+      const bestByWorkflow: Record<string, typeof allData[0]> = {};
+      filteredByWorkflow.forEach(c => {
+        const parsed = parseConditionName(c.condition);
+        const name = parsed.name;
+        if (!bestByWorkflow[name] || c.planned_accuracy > bestByWorkflow[name].planned_accuracy) {
+          bestByWorkflow[name] = c;
+        }
+      });
+      return Object.values(bestByWorkflow).sort((a, b) => b.planned_accuracy - a.planned_accuracy);
+    } else {
+      return [...filteredByWorkflow].sort((a, b) => b.planned_accuracy - a.planned_accuracy);
+    }
+  }, [getFilteredAccuracies, effortFilter, selectedWorkflows]);
+
   // Get dynamic paired comparisons based on baseline condition
   const getDynamicPairedComparisons = () => {
     if (!details) return [];
@@ -546,14 +759,6 @@ export default function App() {
     // Do not filter out unselected conditions from rendering to keep axis stable and allow clicking them
     const data = allData;
 
-    const formatLabel = (id: string) => {
-      const match = id.match(/^([a-z-]+)-(?:e|w|s)-(.*)$/);
-      if (match) {
-        return `${match[1]} [${match[2]}]`;
-      }
-      return id;
-    };
-
     const maxCost = Math.max(...data.map(c => c.cost / (c.expected || 1)), 0.01);
     const maxTime = Math.max(...data.map(c => c.avg_time / 1000), 1.0);
     const maxTokens = Math.max(...data.map(c => c.output_tokens / (c.expected || 1)), 100);
@@ -595,23 +800,27 @@ export default function App() {
       'unknown': { stroke: '#4b5563', fill: '#9ca3af', text: '#374151' } // gray
     };
 
-    // Group by workflow and reasoning effort (only selected conditions get connected by lines)
-    const groups: Record<string, typeof data> = {};
-    data.forEach(c => {
-      const gName = getGroupName(c);
-      const isSelected = selectedGroups.includes(gName);
-      if (!isSelected) return;
-      if (!groups[gName]) groups[gName] = [];
-      groups[gName].push(c);
+    const selectedData = data.filter(c => selectedGroups.includes(getGroupName(c)));
+
+    const seriesGroups: Record<string, typeof data> = {};
+    selectedData.forEach(c => {
+      const seriesKey = getSeriesKey(c);
+      if (!seriesGroups[seriesKey]) seriesGroups[seriesKey] = [];
+      seriesGroups[seriesKey].push(c);
     });
 
-    // Group by workflow and reasoning effort for checking representatives (regardless of selection)
-    const repGroups: Record<string, typeof data> = {};
-    data.forEach(item => {
-      const gName = getGroupName(item);
-      if (!repGroups[gName]) repGroups[gName] = [];
-      repGroups[gName].push(item);
+    const workflowGroups: Record<string, typeof data> = {};
+    selectedData.forEach(c => {
+      const workflow = getGroupName(c);
+      if (!workflowGroups[workflow]) workflowGroups[workflow] = [];
+      workflowGroups[workflow].push(c);
     });
+    const groupRepresentatives = Object.entries(workflowGroups).map(([workflow, members]) => ({
+      workflow,
+      condition: [...members].sort((a, b) =>
+        b.planned_accuracy - a.planned_accuracy || getVal(a) - getVal(b)
+      )[0],
+    }));
 
     const maxDataAcc = Math.max(...data.map(c => c.planned_accuracy), 0.1);
     let maxY = 1.0;
@@ -638,9 +847,17 @@ export default function App() {
     const hoveredVal = hoveredPoint ? getVal(hoveredPoint) : null;
     const hoveredX = hoveredPoint && hoveredVal !== null ? getX(hoveredVal) : null;
     const hoveredY = hoveredPoint ? getY(hoveredPoint.planned_accuracy) : null;
-    const hoveredColors = hoveredPoint ? (workflowColors[hoveredPoint.workflow || 'unknown'] || workflowColors['unknown']) : null;
+    const hoveredColors = hoveredPoint ? (workflowColors[getGroupName(hoveredPoint)] || workflowColors['unknown']) : null;
 
-    const allGroups = Array.from(new Set(data.map(c => getGroupName(c))));
+    const allGroups = Array.from(new Set(data.map(c => getGroupName(c)))).sort((a, b) => {
+      const aIndex = WORKFLOW_ORDER.indexOf(a);
+      const bIndex = WORKFLOW_ORDER.indexOf(b);
+      return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex);
+    });
+
+    const tooltipWidth = 238;
+    const tooltipX = hoveredX === null ? 0 : hoveredX > 720 ? hoveredX - tooltipWidth - 18 : hoveredX + 18;
+    const tooltipY = hoveredY === null ? 0 : Math.max(62, Math.min(hoveredY - 38, 465));
 
     return (
       <div>
@@ -719,7 +936,7 @@ export default function App() {
                   boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                 }}
               >
-                Groups ({selectedGroups.length}/{allGroups.length}) {isDropdownOpen ? '▲' : '▼'}
+                Workflows ({selectedGroups.length}/{allGroups.length}) {isDropdownOpen ? '▲' : '▼'}
               </button>
               {isDropdownOpen && (
                 <>
@@ -784,7 +1001,7 @@ export default function App() {
                               }}
                               style={{ cursor: 'pointer' }}
                             />
-                            <span>{wf}</span>
+                            <span>{formatWorkflowName(wf)}</span>
                           </label>
                         );
                       })}
@@ -884,8 +1101,8 @@ export default function App() {
               {xAxisLabel}
             </text>
 
-            {/* Connect lines between same workflow, sorted by X */}
-            {Object.entries(groups).map(([gName, members]) => {
+            {/* Connect only configurations where one scale variable changes. */}
+            {Object.entries(seriesGroups).map(([seriesKey, members]) => {
               const sorted = [...members].sort((a, b) => getVal(a) - getVal(b));
               if (sorted.length < 2) return null;
               const pathData = sorted.map((c, idx) => {
@@ -893,19 +1110,16 @@ export default function App() {
                 const y = getY(c.planned_accuracy);
                 return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
               }).join(' ');
-              const wf = members[0].workflow || 'unknown';
+              const wf = getGroupName(members[0]);
               const colors = workflowColors[wf] || workflowColors['unknown'];
-              const effort = getReasoningEffort(members[0].condition);
-              const isDashed = effort.includes('low');
               return (
                 <path
-                  key={gName}
+                  key={seriesKey}
                   d={pathData}
                   fill="none"
                   stroke={colors.stroke}
-                  strokeWidth="2"
-                  strokeDasharray={isDashed ? "4,4" : undefined}
-                  style={{ opacity: 0.8 }}
+                  strokeWidth={wf === 'supervisor' ? "2.4" : "2"}
+                  style={{ opacity: 0.72 }}
                 />
               );
             })}
@@ -936,18 +1150,13 @@ export default function App() {
             )}
 
             {/* Plot points and condition labels */}
-            {data.filter(c => selectedGroups.includes(getGroupName(c))).map((c, idx) => {
+            {selectedData.map((c, idx) => {
               const val = getVal(c);
               const x = getX(val);
               const y = getY(c.planned_accuracy);
-              const colors = workflowColors[c.workflow || 'unknown'] || workflowColors['unknown'];
+              const colors = workflowColors[getGroupName(c)] || workflowColors['unknown'];
 
               const isHovered = hoveredCondition === c.condition;
-
-              // Only annotate one node per group (e.g. the last node in the sorted representatives, or if hovered)
-              const sortedReps = repGroups[getGroupName(c)] ? [...repGroups[getGroupName(c)]].sort((a, b) => getVal(a) - getVal(b)) : [];
-              const isRepresentative = sortedReps.length > 0 && sortedReps[sortedReps.length - 1].condition === c.condition;
-              const shouldAnnotate = isRepresentative || isHovered;
 
               return (
                 <g 
@@ -965,43 +1174,10 @@ export default function App() {
                     fill={colors.fill} 
                     stroke={isHovered ? colors.stroke : "white"} 
                     strokeWidth={isHovered ? "3" : "2"} 
-                  />
+                  >
+                    <title>{formatWorkflowName(getGroupName(c))}: {formatConditionConfig(c)}</title>
+                  </circle>
                   
-                  {shouldAnnotate && (
-                    <g>
-                      {/* SVG Text Backdrop (White outline / halo effect) */}
-                      <text
-                        x={x + 12}
-                        y={y + 4}
-                        fill="white"
-                        stroke="white"
-                        strokeWidth="5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        style={{ 
-                          fontSize: '12px', 
-                          fontWeight: isHovered ? 'bold' : '500', 
-                          fontFamily: 'var(--font-mono)' 
-                        }}
-                      >
-                        {formatLabel(c.condition)}
-                      </text>
-                      {/* Foreground color text */}
-                      <text
-                        x={x + 12}
-                        y={y + 4}
-                        fill={colors.text}
-                        style={{ 
-                          fontSize: '12px', 
-                          fontWeight: isHovered ? 'bold' : '500', 
-                          fontFamily: 'var(--font-mono)' 
-                        }}
-                      >
-                        {formatLabel(c.condition)}
-                      </text>
-                    </g>
-                  )}
-
                   {/* Larger invisible overlay for easier mouse hovering and clicking */}
                   <circle
                     cx={x}
@@ -1023,26 +1199,98 @@ export default function App() {
                 </g>
               );
             })}
+
+            {/* Annotate the highest-accuracy condition in each workflow group. */}
+            {groupRepresentatives.map(({ workflow, condition }) => {
+              if (!condition) return null;
+              const pointX = getX(getVal(condition));
+              const pointY = getY(condition.planned_accuracy);
+              const colors = workflowColors[workflow] || workflowColors['unknown'];
+              const label = formatConditionTag(condition);
+              const tagWidth = Math.min(238, Math.max(94, label.length * 6.15 + 22));
+              const tagX = pointX > 800
+                ? pointX - tagWidth - 12
+                : pointX < 260
+                  ? pointX + 12
+                  : pointX - tagWidth / 2;
+              const tagY = Math.max(62, pointY - 38);
+              const leaderX = Math.max(tagX + 12, Math.min(pointX, tagX + tagWidth - 12));
+
+              return (
+                <g key={`tag-${workflow}`} pointerEvents="none">
+                  <line
+                    x1={pointX}
+                    y1={pointY - 9}
+                    x2={leaderX}
+                    y2={tagY + 24}
+                    stroke={colors.stroke}
+                    strokeWidth="1"
+                    opacity="0.45"
+                  />
+                  <rect
+                    x={tagX}
+                    y={tagY}
+                    width={tagWidth}
+                    height="24"
+                    rx="4"
+                    fill="white"
+                    stroke={colors.stroke}
+                    strokeOpacity="0.3"
+                  />
+                  <circle cx={tagX + 11} cy={tagY + 12} r="3.5" fill={colors.fill} />
+                  <text
+                    x={tagX + 20}
+                    y={tagY + 15.5}
+                    fill={colors.text}
+                    style={{ fontSize: '10px', fontWeight: '600', fontFamily: 'var(--font-mono)' }}
+                  >
+                    {label}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Hover details use the same compact treatment as the group tags. */}
+            {hoveredPoint && hoveredX !== null && hoveredY !== null && hoveredColors && hoveredVal !== null && (
+              <g pointerEvents="none">
+                <rect
+                  x={tooltipX}
+                  y={tooltipY}
+                  width={tooltipWidth}
+                  height="68"
+                  rx="4"
+                  fill="white"
+                  stroke={hoveredColors.stroke}
+                  strokeOpacity="0.35"
+                  style={{ filter: 'drop-shadow(0 2px 5px rgba(15, 23, 42, 0.09))' }}
+                />
+                <circle cx={tooltipX + 12} cy={tooltipY + 15} r="3.5" fill={hoveredColors.fill} />
+                <text x={tooltipX + 21} y={tooltipY + 18.5} fill={hoveredColors.text} style={{ fontSize: '10px', fontWeight: '700', fontFamily: 'var(--font-mono)' }}>
+                  {formatConditionTag(hoveredPoint)}
+                </text>
+                <text x={tooltipX + 12} y={tooltipY + 38} fill="var(--text-secondary)" style={{ fontSize: '9.5px' }}>
+                  {formatConditionConfig(hoveredPoint)}
+                </text>
+                <text x={tooltipX + 12} y={tooltipY + 57} fill="var(--text-primary)" style={{ fontSize: '10.5px', fontWeight: '600' }}>
+                  {(hoveredPoint.planned_accuracy * 100).toFixed(1)}% accuracy
+                </text>
+                <text x={tooltipX + tooltipWidth - 12} y={tooltipY + 57} textAnchor="end" fill="var(--text-secondary)" style={{ fontSize: '10.5px' }}>
+                  {formatTick(hoveredVal)}
+                </text>
+              </g>
+            )}
           </svg>
 
           {/* Legend */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'center', marginTop: '16px' }}>
-            {Object.keys(groups).map(gName => {
-              const wf = groups[gName][0]?.workflow || 'unknown';
+            {allGroups.filter(group => selectedGroups.includes(group)).map(group => {
+              const wf = group;
               const colors = workflowColors[wf] || workflowColors['unknown'];
-              const effort = getReasoningEffort(groups[gName][0]?.condition || '');
-              const isDashed = effort.includes('low');
               return (
-                <div key={gName} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px' }}>
-                  <span style={{ 
-                    display: 'inline-block', 
-                    width: '12px', 
-                    height: isDashed ? '0px' : '3px', 
-                    backgroundColor: isDashed ? 'transparent' : colors.stroke,
-                    borderTop: isDashed ? `3px dashed ${colors.stroke}` : 'none'
-                  }}></span>
-                  <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: colors.fill, border: `1px solid ${colors.stroke}`, marginLeft: '-9px' }}></span>
-                  <span style={{ fontWeight: '600', textTransform: 'capitalize', color: 'var(--text-primary)' }}>{gName}</span>
+                <div key={group} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px' }}>
+                  <span style={{ display: 'inline-block', width: '14px', height: '2px', backgroundColor: colors.stroke }} />
+                  <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', backgroundColor: colors.fill, border: `1px solid ${colors.stroke}`, marginLeft: '-10px' }} />
+                  <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{formatWorkflowName(group)}</span>
                 </div>
               );
             })}
@@ -1484,56 +1732,325 @@ export default function App() {
                 </div>
 
                 {/* SVG Visualizations of Accuracy & CIs */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                  {/* Accuracy Bar Chart with Error Whiskers */}
-                  <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '20px' }}>
-                    <h3 style={{ fontSize: '13px', fontWeight: '700', marginBottom: '12px' }}>Planned-job Accuracy (with 95% Wilson CI)</h3>
-                    <div style={{ width: '100%', overflow: 'hidden' }}>
-                      <svg viewBox="0 0 500 250" width="100%" height="250" style={{ background: 'white' }}>
-                        {/* Axes */}
-                        <line x1="60" y1="20" x2="60" y2="200" stroke="#000" />
-                        <line x1="60" y1="200" x2="480" y2="200" stroke="#000" />
+                <div className="results-grid">
+                  {/* Accuracy Bar Chart with Error Whiskers (Deepswe-style) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                      {/* Effort level toggle buttons */}
+                      <div style={{ display: 'inline-flex', height: '28px', alignItems: 'center', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden', fontSize: '12px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setEffortFilter('best')}
+                          style={{
+                            height: '100%',
+                            padding: '0 12px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            backgroundColor: effortFilter === 'best' ? 'var(--accent-color)' : 'transparent',
+                            color: effortFilter === 'best' ? '#ffffff' : 'var(--text-secondary)',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          Best
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEffortFilter('all')}
+                          style={{
+                            height: '100%',
+                            padding: '0 12px',
+                            border: 'none',
+                            borderLeft: '1px solid var(--border-color)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            backgroundColor: effortFilter === 'all' ? 'var(--accent-color)' : 'transparent',
+                            color: effortFilter === 'all' ? '#ffffff' : 'var(--text-secondary)',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          All effort levels
+                        </button>
+                      </div>
+
+                      {/* Workflows checklist dropdown */}
+                      <div style={{ position: 'relative', display: 'inline-block' }}>
+                        <button 
+                          type="button" 
+                          onClick={() => setShowWorkflowDropdown(!showWorkflowDropdown)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-primary)',
+                            cursor: 'pointer',
+                            height: '28px',
+                            gap: '6px',
+                            padding: '0 10px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 500,
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-primary)'; }}
+                        >
+                          <span>Workflows</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontSize: '11px' }}>
+                            ({selectedWorkflows.length}/{allWorkflows.length})
+                          </span>
+                          <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            width="14" 
+                            height="14" 
+                            viewBox="0 0 24 24" 
+                            fill="none" 
+                            stroke="currentColor" 
+                            strokeWidth="2" 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round"
+                            style={{
+                              transform: showWorkflowDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
+                              transition: 'transform 0.2s ease',
+                            }}
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </button>
                         
-                        {/* Grid lines */}
-                        {[0, 0.2, 0.4, 0.6, 0.8, 1.0].map((val, idx) => {
-                          const y = 200 - val * 170;
-                          return (
-                            <g key={idx}>
-                              <line x1="60" y1={y} x2="480" y2={y} stroke="#f3f4f6" />
-                              <text x="50" y={y + 4} textAnchor="end" style={{ fontSize: '10px' }}>
-                                {(val * 100).toFixed(0)}%
-                              </text>
-                            </g>
-                          );
-                        })}
+                        {showWorkflowDropdown && (
+                          <>
+                            <div 
+                              style={{ position: 'fixed', inset: 0, zIndex: 998 }} 
+                              onClick={() => setShowWorkflowDropdown(false)} 
+                            />
+                            <div 
+                              style={{
+                                position: 'absolute',
+                                top: '32px',
+                                right: 0,
+                                backgroundColor: 'var(--bg-primary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '6px',
+                                padding: '8px',
+                                minWidth: '200px',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                zIndex: 999,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '4px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px', marginBottom: '4px' }}>
+                                <button 
+                                  type="button"
+                                  onClick={() => setSelectedWorkflows(allWorkflows)}
+                                  style={{ border: 'none', background: 'none', color: 'var(--accent-highlight)', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
+                                >
+                                  Select All
+                                </button>
+                                <button 
+                                  type="button"
+                                  onClick={() => setSelectedWorkflows([])}
+                                  style={{ border: 'none', background: 'none', color: 'var(--text-secondary)', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                              {allWorkflows.map(wf => {
+                                const isChecked = selectedWorkflows.includes(wf);
+                                return (
+                                  <label 
+                                    key={wf} 
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      padding: '4px 6px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontSize: '12px',
+                                      transition: 'background 0.1s ease',
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                                  >
+                                    <input 
+                                      type="checkbox" 
+                                      checked={isChecked}
+                                      onChange={() => {
+                                        if (isChecked) {
+                                          setSelectedWorkflows(selectedWorkflows.filter(w => w !== wf));
+                                        } else {
+                                          setSelectedWorkflows([...selectedWorkflows, wf]);
+                                        }
+                                      }}
+                                      style={{ cursor: 'pointer' }}
+                                    />
+                                    <span>{wf}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
 
-                        {/* Bars and error intervals */}
-                        {getFilteredAccuracies().map((c, idx, arr) => {
-                          const w = 400 / arr.length;
-                          const x = 60 + idx * w + w / 2;
-                          const yAcc = 200 - c.planned_accuracy * 170;
-                          
-                          const yLower = 200 - (c.planned_ci_lower || 0) * 170;
-                          const yUpper = 200 - (c.planned_ci_upper || 0) * 170;
+                    {/* Table Container */}
+                    <div className="deepswe-container">
+                      {/* Header */}
+                      <div className="deepswe-header">
+                        <div style={{ width: '210px', flexShrink: 0 }}>Workflow / Agent</div>
+                        <div style={{ flex: 1 }}></div>
+                        <div className="deepswe-desktop-stat deepswe-w-pass">Pass@1</div>
+                        <div className="deepswe-desktop-stat deepswe-w-cost">Avg cost</div>
+                        <div className="deepswe-desktop-stat deepswe-w-time">Avg time</div>
+                        <div className="deepswe-desktop-stat deepswe-w-tok">Out tok</div>
+                      </div>
 
-                          return (
-                            <g key={idx}>
-                              {/* Bar */}
-                              <rect x={x - w / 4} y={yAcc} width={w / 2} height={Math.max(2, 200 - yAcc)} fill="#94a3b8" rx="2" />
+                      {/* Rows */}
+                      {displayedAccuracies.map((c) => {
+                        const parsed = parseConditionName(c.condition);
+                        const accuracyPercent = Math.round(c.planned_accuracy * 100);
+                        const errMargin = Math.round(((c.planned_ci_upper - c.planned_ci_lower) / 2) * 100);
+                        
+                        const maxAccuracy = Math.max(...displayedAccuracies.map(acc => acc.planned_accuracy), 0.1);
+                        let scaleMax = 1.0;
+                        if (maxAccuracy <= 0.2) {
+                          scaleMax = 0.2;
+                        } else if (maxAccuracy <= 0.4) {
+                          scaleMax = 0.4;
+                        } else if (maxAccuracy <= 0.6) {
+                          scaleMax = 0.6;
+                        } else if (maxAccuracy <= 0.8) {
+                          scaleMax = 0.8;
+                        }
+
+                        const barWidth = `${(c.planned_accuracy / scaleMax) * 100}%`;
+                        const ciLeft = `${((c.planned_ci_lower || 0) / scaleMax) * 100}%`;
+                        const ciWidth = `${(((c.planned_ci_upper || 0) - (c.planned_ci_lower || 0)) / scaleMax) * 100}%`;
+
+                        const avgCost = c.expected > 0 ? c.cost / c.expected : 0;
+                        const avgTime = c.avg_time;
+                        const avgOutTok = c.expected > 0 ? c.output_tokens / c.expected : 0;
+
+                        return (
+                          <div key={c.condition} className="deepswe-row">
+                            <div className="deepswe-model-col">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', color: getWorkflowColor(parsed.name), flexShrink: 0 }}>
+                                  {getWorkflowIcon(parsed.name)}
+                                </span>
+                                <span style={{ fontWeight: 500, fontSize: '13px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={parsed.name}>
+                                  {parsed.name}
+                                </span>
+                                {parsed.effort && (
+                                  <span style={{ color: 'var(--text-secondary)', fontSize: '11px', flexShrink: 0 }}>
+                                    [{parsed.effort}]
+                                  </span>
+                                )}
+                              </div>
                               
-                              {/* Whiskers */}
-                              <line x1={x} y1={yLower} x2={x} y2={yUpper} stroke="#0f172a" strokeWidth="1.5" />
-                              <line x1={x - 6} y1={yLower} x2={x + 6} y2={yLower} stroke="#0f172a" strokeWidth="1.5" />
-                              <line x1={x - 6} y1={yUpper} x2={x + 6} y2={yUpper} stroke="#0f172a" strokeWidth="1.5" />
+                              {/* Mobile pass@1 */}
+                              <div className="sm-hidden-only">
+                                <span style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums' }}>
+                                  <span style={{ fontWeight: 600 }}>{accuracyPercent}%</span>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '4px' }}>±{errMargin}%</span>
+                                </span>
+                              </div>
+                            </div>
 
-                              {/* Label */}
-                              <text x={x} y="215" textAnchor="middle" style={{ fontSize: '9px', fontWeight: '500' }}>
-                                {c.condition.slice(0, 12)}
-                              </text>
-                            </g>
-                          );
-                        })}
-                      </svg>
+                            {/* Bar Column */}
+                            <div className="deepswe-bar-col">
+                              <div style={{ position: 'relative', height: '20px' }}>
+                                {/* Background track */}
+                                <div style={{ position: 'absolute', top: '4px', bottom: '4px', left: 0, right: 0, backgroundColor: 'rgba(107, 114, 128, 0.08)', borderRadius: '3px' }} />
+                                {/* Colored Bar */}
+                                <div style={{ position: 'absolute', top: '4px', bottom: '4px', left: 0, width: barWidth, backgroundColor: getWorkflowColor(parsed.name), borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                                {/* Whisker line */}
+                                <div style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: ciLeft, width: ciWidth, height: '1px', backgroundColor: 'rgba(17, 24, 39, 0.65)' }} />
+                                {/* Left whisker tick */}
+                                <div style={{ position: 'absolute', top: '3px', bottom: '3px', left: ciLeft, width: '1px', backgroundColor: 'rgba(17, 24, 39, 0.65)' }} />
+                                {/* Right whisker tick */}
+                                <div style={{ position: 'absolute', top: '3px', bottom: '3px', left: `calc(${ciLeft} + ${ciWidth})`, width: '1px', backgroundColor: 'rgba(17, 24, 39, 0.65)' }} />
+                              </div>
+                            </div>
+
+                            {/* Mobile Info Stats */}
+                            <div className="deepswe-mobile-stats">
+                              <span style={{ color: 'var(--text-secondary)' }}>Avg cost <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)', fontWeight: 500 }}>{formatAvgCost(avgCost)}</span></span>
+                              <span style={{ color: 'var(--text-secondary)' }}>Avg time <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)', fontWeight: 500 }}>{formatAvgTime(avgTime)}</span></span>
+                              <span style={{ color: 'var(--text-secondary)' }}>Out tok <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)', fontWeight: 500 }}>{formatAvgTokens(avgOutTok)}</span></span>
+                            </div>
+
+                            {/* Desktop Stats */}
+                            <div className="deepswe-desktop-stat deepswe-w-pass">
+                              <span style={{ fontSize: '13px' }}>
+                                <span style={{ fontWeight: 600 }}>{accuracyPercent}%</span>
+                                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginLeft: '4px' }}>±{errMargin}%</span>
+                              </span>
+                            </div>
+                            <div className="deepswe-desktop-stat deepswe-w-cost" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{formatAvgCost(avgCost)}</div>
+                            <div className="deepswe-desktop-stat deepswe-w-time" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{formatAvgTime(avgTime)}</div>
+                            <div className="deepswe-desktop-stat deepswe-w-tok" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{formatAvgTokens(avgOutTok)}</div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Bottom Ticks Axis */}
+                      {displayedAccuracies.length > 0 && (() => {
+                        const maxAccuracy = Math.max(...displayedAccuracies.map(acc => acc.planned_accuracy), 0.1);
+                        let scaleMax = 1.0;
+                        let ticks = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
+                        if (maxAccuracy <= 0.2) {
+                          scaleMax = 0.2;
+                          ticks = [0, 0.05, 0.1, 0.15, 0.2];
+                        } else if (maxAccuracy <= 0.4) {
+                          scaleMax = 0.4;
+                          ticks = [0, 0.1, 0.2, 0.3, 0.4];
+                        } else if (maxAccuracy <= 0.6) {
+                          scaleMax = 0.6;
+                          ticks = [0, 0.15, 0.3, 0.45, 0.6];
+                        } else if (maxAccuracy <= 0.8) {
+                          scaleMax = 0.8;
+                          ticks = [0, 0.2, 0.4, 0.6, 0.8];
+                        }
+
+                        return (
+                          <div className="deepswe-axis-container">
+                            <div className="deepswe-model-col" style={{ height: 0, border: 'none', padding: 0 }} />
+                            <div style={{ flex: 1, position: 'relative', height: '16px' }}>
+                              {ticks.map((tickVal, idx) => {
+                                const leftPercent = (tickVal / scaleMax) * 100;
+                                let transform = 'translateX(-50%)';
+                                if (idx === 0) transform = 'translateX(0)';
+                                if (idx === ticks.length - 1) transform = 'translateX(-100%)';
+                                return (
+                                  <span 
+                                    key={idx} 
+                                    style={{
+                                      position: 'absolute',
+                                      left: `${leftPercent}%`,
+                                      transform,
+                                      fontSize: '10px',
+                                      color: 'var(--text-muted)',
+                                      fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                  >
+                                    {Math.round(tickVal * 100)}%
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            <div className="deepswe-desktop-stat deepswe-w-pass" />
+                            <div className="deepswe-desktop-stat deepswe-w-cost" />
+                            <div className="deepswe-desktop-stat deepswe-w-time" />
+                            <div className="deepswe-desktop-stat deepswe-w-tok" />
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
